@@ -1,0 +1,14 @@
+# Data for the preliminary sample paper (development laptop; SoT D13: not reportable results).
+experiment_id: sample-paper
+bucket: pqc-bench
+repetitions: 1
+warmup_s: 1
+duration_s: 4
+get_objects: 8
+pool_bytes: 33554432
+seed: 20260924
+blocks:
+  - sizes: [1024, 65536, 1048576, 16777216]
+    concurrency: [1, 4, 16]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1, P2]

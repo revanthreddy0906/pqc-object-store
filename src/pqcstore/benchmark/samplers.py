@@ -19,12 +19,13 @@ CLIENT_FIELDS = ["run_id", "ts_utc_ns", "proc_cpu_pct", "host_cpu_pct", "logical
                  "proc_rss_bytes", "host_mem_used_bytes", "net_tx_bytes", "net_rx_bytes",
                  "load_avg_1m"]
 SERVER_FIELDS = ["run_id", "ts_utc_ns", "proc_cpu_pct", "proc_cpu_seconds", "proc_rss_bytes",
-                 "net_rx_bytes", "net_tx_bytes", "scrape_ok"]
+                 "net_rx_bytes", "net_tx_bytes", "drive_free_bytes", "scrape_ok"]
 SERVER_METRICS = {
     "minio_process_cpu_seconds_total": "proc_cpu_seconds",
     "minio_process_resident_memory_bytes": "proc_rss_bytes",
     "minio_process_network_receive_bytes_total": "net_rx_bytes",
     "minio_process_network_transmit_bytes_total": "net_tx_bytes",
+    "minio_node_drive_free_bytes": "drive_free_bytes",
 }
 
 
@@ -35,7 +36,8 @@ def scrape_minio(metrics_url: str, timeout: float = 2.0) -> dict[str, float]:
     for line in text.splitlines():
         if line.startswith("#"):
             continue
-        name, _, value = line.partition(" ")
+        name, _, value = line.rpartition(" ")
+        name = name.split("{", 1)[0]  # drop labels, e.g. drive="/data"
         if name in SERVER_METRICS:
             values[SERVER_METRICS[name]] = float(value)
     return values

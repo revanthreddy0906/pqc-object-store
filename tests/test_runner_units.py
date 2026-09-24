@@ -90,3 +90,28 @@ def test_validate_detects_modified_raw_data(tmp_path):
 
 def test_validate_reports_invalid_runs(tmp_path):
     assert v.validate(make_run_dir(tmp_path, [good_record()], valid=False)).invalid_runs == ["r1"]
+
+
+def test_disk_guard(tmp_path, monkeypatch):
+    import shutil
+
+    from pqcstore.benchmark import runner, samplers
+
+    assert runner.disk_guard(tmp_path, None, 1) is None
+    assert "client disk" in runner.disk_guard(tmp_path, None, 2**62)
+    monkeypatch.setattr(samplers, "scrape_minio", lambda url: {"drive_free_bytes": 10.0})
+    assert "server drive" in runner.disk_guard(tmp_path, "http://x", 1024)
+    assert shutil.disk_usage(tmp_path).free > 0
+
+
+def test_scrape_parses_labelled_metrics(monkeypatch):
+    import io
+
+    from pqcstore.benchmark import samplers
+
+    text = ('# HELP x\nminio_process_cpu_seconds_total 1.5\n'
+            'minio_node_drive_free_bytes{drive="/data",server="a:9000"} 2.5e+09\n')
+    monkeypatch.setattr(samplers.urllib.request, "urlopen",
+                        lambda url, timeout: io.BytesIO(text.encode()))
+    values = samplers.scrape_minio("http://x")
+    assert values == {"proc_cpu_seconds": 1.5, "drive_free_bytes": 2.5e9}

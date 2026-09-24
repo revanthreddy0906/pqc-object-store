@@ -12,6 +12,9 @@ services:
       # Server-side resource sampling scrapes /minio/v2/metrics/node (SoT §8.3).
       # Public only because the port is bound to 127.0.0.1; use a bearer token on shared hosts.
       MINIO_PROMETHEUS_AUTH_TYPE: public
+      # Purge deleted objects every 30 s (default 5 min): benchmarks write and delete GBs per
+      # minute, and the default let 12 GB of deleted data pile up and fill the host disk.
+      MINIO_API_DELETE_CLEANUP_INTERVAL: 30s
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"

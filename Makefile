@@ -4,7 +4,7 @@ PY := $(VENV)/bin/python
 export OQS_INSTALL_PATH := $(CURDIR)/.local/liboqs
 
 .PHONY: help setup venv liboqs env minio-build services-up services-down services-logs \
-        doctor s3-smoke soak stream-check bench-smoke validate-results gc test test-unit test-integration lint docs clean
+        doctor s3-smoke soak stream-check bench-smoke validate-results paper-assets paper gc test test-unit test-integration lint docs clean
 
 help:  ## list targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -53,6 +53,18 @@ bench-smoke:  ## run config/development.yaml through the full benchmark pipeline
 validate-results:  ## validate the newest experiment directory (or RUN=path)
 	$(PY) -m pqcstore.cli validate $${RUN:-$$(ls -d experiments/*/* | tail -1)}
 
+paper-assets:  ## regenerate paper figures/tables/numbers (EXP=, N1=, MICRO=, MEMORY= override)
+	$(VENV)/bin/pip install --quiet -e ".[analysis]"
+	$(PY) analysis/make_paper_assets.py \
+		--experiment $${EXP:-$$(ls -d experiments/sample-paper/* | tail -1)} \
+		--n1 $${N1:-$$(ls -d experiments/n1-dev/* | tail -1)} \
+		--micro $${MICRO:-$$(ls experiments/microbench/*.json | tail -1)} \
+		--memory $${MEMORY:-$$(ls experiments/memory/*.json | tail -1)} \
+		--out paper/generated
+
+paper:  ## build paper/main.pdf with tectonic (IEEEtran is fetched on first use)
+	cd paper && tectonic -X compile main.tex
+
 gc:  ## report and remove uncommitted data older than 60 minutes
 	$(PY) -m pqcstore.cli gc
 
@@ -66,7 +78,7 @@ test-integration:  ## integration tests; fail if MinIO is down
 	PQC_REQUIRE_MINIO=1 $(PY) -m pytest -m integration
 
 lint:
-	$(VENV)/bin/ruff check src tests
+	$(VENV)/bin/ruff check src tests analysis
 
 docs:  ## rebuild docs/source-of-truth.pdf (macOS fonts; needs the docs extra)
 	$(PY) -m pip install --quiet -e ".[docs]"

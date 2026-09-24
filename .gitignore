@@ -22,3 +22,10 @@ experiments/*/
 results/raw/
 
 .DS_Store
+
+# LaTeX intermediates (tectonic keeps none by default)
+paper/*.aux
+paper/*.log
+paper/*.bbl
+paper/*.blg
+paper/*.out

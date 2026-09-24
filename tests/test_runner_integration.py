@@ -56,3 +56,26 @@ def test_tiny_experiment_end_to_end(store, settings, tmp_path):
     # Workers delete their PUT objects and the runner deletes GET fixtures.
     from pqcstore.storage.encrypted_store import EncryptedObjectStore
     assert EncryptedObjectStore(store).audit(settings.bucket, "bench/tiny/").committed == []
+
+
+def test_a_failing_run_is_recorded_and_the_experiment_continues(store, settings, tmp_path,
+                                                                monkeypatch):
+    from pqcstore.benchmark import runner
+
+    def broken(*args, **kwargs):
+        raise ConnectionError("simulated storage failure during setup")
+
+    monkeypatch.setattr(runner, "prepare_get_objects", broken)
+    config = tmp_path / "c.yaml"
+    config.write_text(yaml.safe_dump({
+        "experiment_id": "broken", "bucket": settings.bucket, "warmup_s": 0.2, "duration_s": 0.4,
+        "pool_bytes": 1 << 20,
+        "blocks": [{"sizes": [1024], "concurrency": [1], "operations": ["get", "put"],
+                    "modes": ["B1"]}],
+    }))
+    run_dir, outcomes = run_experiment(config, tmp_path / "out", progress=lambda _: None)
+    by_op = {o.run_id.split("-")[3]: o for o in outcomes}
+    assert not by_op["get"].valid and "ConnectionError" in by_op["get"].note
+    assert by_op["put"].valid and by_op["put"].records > 0
+    manifest = yaml.safe_load((run_dir / "run-manifest.yaml").read_text())
+    assert len(manifest["runs"]) == 2 and "finished_utc" in manifest

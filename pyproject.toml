@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 docs = ["reportlab>=4"]
+analysis = ["matplotlib>=3.9", "numpy>=2"]
 
 [project.scripts]
 pqcstore = "pqcstore.cli:main"

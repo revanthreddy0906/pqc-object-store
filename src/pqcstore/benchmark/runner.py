@@ -404,6 +404,7 @@ class ExperimentConfig:
     pool_bytes: int = 64 * 1024 * 1024
     seed: int = 1
     max_processes: int | None = None
+    min_free_bytes: int = 5 * 2**30  # disk guard for client and server (checked per run)
     server_metrics_url: str | None = "http://127.0.0.1:9000/minio/v2/metrics/node"
     raw: dict = field(default_factory=dict)
 
@@ -511,41 +512,84 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
     }
     outcomes = []
     total = config.repetitions * sum(len(b) for b in blocks)
+    def save_manifest() -> None:  # after every run, so an interruption loses nothing
+        (run_dir / "run-manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False),
+                                                   encoding="utf-8")
+
+    stopped = None
     for repetition in range(1, config.repetitions + 1):
         order_rng = random.Random(f"{config.seed}-{repetition}")
         for block_index, block in enumerate(blocks):
             cells = block[:]
             order_rng.shuffle(cells)  # randomized mode order within the block (SoT §9.3)
             for cell in cells:
+                if stopped is None:
+                    stopped = disk_guard(run_dir, config.server_metrics_url,
+                                         config.min_free_bytes)
+                if stopped is not None:
+                    break
                 run_id = f"rep{repetition:02d}-b{block_index:03d}-{cell.label()}"
-                get_objects: list[tuple[str, str]] = []
                 prefix = f"bench/{config.experiment_id}/{stamp}/{run_id}/"
-                if cell.operation in ("get", "mix"):
-                    get_objects = prepare_get_objects(config.bucket, cell, public,
-                                                      config.get_objects, config.chunk_size,
-                                                      prefix)
-                plan = RunPlan(config.experiment_id, run_id, f"b{block_index:03d}", repetition,
-                               cell, config.bucket, config.chunk_size, config.part_size,
-                               config.warmup_s, config.duration_s, config.min_measured_ops,
-                               config.pool_bytes, config.seed, commit, config_hash, machine_id,
-                               tuple(get_objects), prefix)
+                get_objects: list[tuple[str, str]] = []
                 started = time.time()
-                outcome = run_cell(plan, public, private, run_dir, config.server_metrics_url,
-                                   config.max_processes)
-                delete_objects(config.bucket, get_objects)
+                try:
+                    if cell.operation in ("get", "mix"):
+                        get_objects = prepare_get_objects(config.bucket, cell, public,
+                                                          config.get_objects, config.chunk_size,
+                                                          prefix)
+                    plan = RunPlan(config.experiment_id, run_id, f"b{block_index:03d}",
+                                   repetition, cell, config.bucket, config.chunk_size,
+                                   config.part_size, config.warmup_s, config.duration_s,
+                                   config.min_measured_ops, config.pool_bytes, config.seed,
+                                   commit, config_hash, machine_id, tuple(get_objects), prefix)
+                    outcome = run_cell(plan, public, private, run_dir,
+                                       config.server_metrics_url, config.max_processes)
+                except Exception as exc:  # noqa: BLE001 - one broken run must not end the experiment
+                    outcome = RunOutcome(run_id, [], 0, 0, False,
+                                         f"setup/run error: {type(exc).__name__}: {exc}"[:300])
+                finally:
+                    try:
+                        delete_objects(config.bucket, get_objects)
+                    except Exception:  # noqa: BLE001, S110 - reported later by `pqcstore gc`
+                        pass
                 outcomes.append(outcome)
                 manifest["runs"].append({**asdict(outcome), "cell": asdict(cell),
                                          "started_unix": started,
                                          "seconds": round(time.time() - started, 2)})
+                save_manifest()
                 progress(f"[{len(outcomes)}/{total}] {run_id}: {outcome.records} requests, "
                          f"{outcome.failures} failed{'' if outcome.valid else ' INVALID'}"
                          f"{' (' + outcome.note + ')' if outcome.note else ''}"
                          f"{' [client-bound]' if outcome.client_bound else ''}")
+    if stopped is not None:
+        manifest["stopped_early"] = stopped
+        progress(f"STOPPED EARLY: {stopped}")
     manifest["finished_utc"] = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    (run_dir / "run-manifest.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False),
-                                               encoding="utf-8")
+    save_manifest()
     write_checksums(run_dir)
     return run_dir, outcomes
+
+
+def disk_guard(run_dir: Path, metrics_url: str | None, min_free: int) -> str | None:
+    """Return a reason to stop if the client disk or the server drive is nearly full.
+    Under Docker Desktop the client-disk check is the one that matters: the server's
+    drive metric reports the VM's disk, not the host's."""
+    import shutil
+
+    free = shutil.disk_usage(run_dir).free
+    if free < min_free:
+        return f"client disk has {free / 2**30:.1f} GiB free (< {min_free / 2**30:.1f} GiB)"
+    if metrics_url:
+        from pqcstore.benchmark.samplers import scrape_minio
+
+        try:
+            server_free = scrape_minio(metrics_url).get("drive_free_bytes")
+        except OSError:
+            server_free = None
+        if server_free is not None and server_free < min_free:
+            return (f"server drive has {server_free / 2**30:.1f} GiB free "
+                    f"(< {min_free / 2**30:.1f} GiB)")
+    return None
 
 
 def write_checksums(run_dir: Path) -> None:

@@ -196,10 +196,11 @@ def cmd_stream_check(args: argparse.Namespace) -> int:
 
     mib = 1024 * 1024
     sizes = [int(float(s) * mib) for s in args.sizes_mib.split(",")]
-    growth, ok = {}, True
+    growth, ok, all_runs = {}, True, []
     print(f"{'size':>9}  {'growth (min of runs)':>21}  round trip  (dev laptop, not a result)")
     for size in sizes:
         runs = [run_isolated(size, args.bucket, args.chunk_size) for _ in range(args.repeats)]
+        all_runs.extend(runs)
         ok = ok and all(r["match"] for r in runs)
         growth[size] = min(r["growth"] for r in runs)
         fastest = min(runs, key=lambda r: r["put_ms"] + r["get_ms"])
@@ -212,6 +213,12 @@ def cmd_stream_check(args: argparse.Namespace) -> int:
     print(f"growth({largest // mib} MiB) - growth({smallest // mib} MiB) = {spread / mib:.1f} MiB "
           f"(tolerance {args.tolerance_mib} MiB)")
     ok = ok and bounded
+    if args.json_out:
+        import json
+
+        Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.json_out).write_text(json.dumps({"runs": all_runs, "pass": ok}, indent=2),
+                                       encoding="utf-8")
     print("PASS" if ok else "FAIL")
     return 0 if ok else 1
 
@@ -244,6 +251,22 @@ def cmd_validate(args: argparse.Namespace) -> int:
             print(f"  {label}: {problem}")
     print("VALID" if report.ok else "INVALID")
     return 0 if report.ok else 1
+
+
+def cmd_microbench(args: argparse.Namespace) -> int:
+    import json
+    import time
+
+    from pqcstore.benchmark.microbench import run
+
+    result = run(args.iterations)
+    out = Path(args.out_dir) / f"microbench-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    for name, stats in result["results"].items():
+        print(f"{name:<28} median {stats['median_us']:10.1f} us  p95 {stats['p95_us']:10.1f} us")
+    print(f"wrote {out}")
+    return 0
 
 
 def cmd_gc(args: argparse.Namespace) -> int:
@@ -313,7 +336,13 @@ def main(argv: list[str] | None = None) -> int:
     stream.add_argument("--chunk-size", type=int, default=4 * 1024 * 1024)
     stream.add_argument("--tolerance-mib", type=int, default=32,
                         help="allowed growth difference between smallest and largest size")
+    stream.add_argument("--json-out", help="also save every probe result to this JSON file")
     stream.set_defaults(func=cmd_stream_check)
+
+    micro = sub.add_parser("microbench", help="per-operation key-establishment costs per mode")
+    micro.add_argument("--iterations", type=int, default=2000)
+    micro.add_argument("--out-dir", default="experiments/microbench")
+    micro.set_defaults(func=cmd_microbench)
 
     bench = sub.add_parser("bench", help="run an experiment configuration")
     bench.add_argument("--config", required=True)

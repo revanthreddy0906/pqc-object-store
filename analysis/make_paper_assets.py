@@ -1,0 +1,408 @@
+"""Generate every figure, table and quoted number of the paper from raw experiment files.
+
+No number in the paper is typed by hand (SoT §1.3): the paper \\input{}s the files
+this script writes to paper/generated/. Re-run it on new experiment directories and
+the paper updates.
+
+    python analysis/make_paper_assets.py \\
+        --experiment experiments/sample-paper/<stamp> \\
+        --n1 experiments/n1-dev/<stamp> \\
+        --micro experiments/microbench/<file>.json \\
+        --memory experiments/memory/<file>.json \\
+        --out paper/generated
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+import statistics
+from collections import defaultdict
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+# Validated categorical slots (dataviz reference palette, light mode, fixed order).
+SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
+INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
+MODES = ["B0", "B1", "R1", "B2", "P1", "P2"]
+MODE_NAME = {"B0": "B0 none", "B1": "B1 AES only", "R1": "R1 RSA-4096", "B2": "B2 X25519",
+             "P1": "P1 ML-KEM-768", "P2": "P2 hybrid"}
+STAGES = [("ke_ns", "Key establishment"), ("kdf_ns", "HKDF + key schedule"),
+          ("aead_ns", "AES-256-GCM"), ("ser_ns", "Manifest / metadata"),
+          ("s3_ns", "Storage + network")]
+MIB = 1024 * 1024
+SIZE_LABEL = {1024: "1 KiB", 65536: "64 KiB", 1048576: "1 MiB", 16777216: "16 MiB"}
+
+plt.rcParams.update({
+    "font.family": "serif", "font.size": 8, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+    "xtick.color": INK2, "ytick.color": INK2, "axes.grid": True, "grid.color": GRID,
+    "grid.linewidth": 0.6, "axes.axisbelow": True, "axes.spines.top": False,
+    "axes.spines.right": False, "legend.frameon": False, "figure.dpi": 200,
+    "savefig.bbox": "tight", "lines.linewidth": 1.6,
+})
+
+
+# ------------------------------------------------------------------ loading
+
+def load_records(run_dir: Path) -> list[dict]:
+    with (run_dir / "requests.jsonl").open(encoding="utf-8") as handle:
+        return [r for r in map(json.loads, handle) if r["success"] and r["phase"] == "measure"]
+
+
+def load_samples(path: Path) -> dict[str, list[dict]]:
+    rows = defaultdict(list)
+    if path.exists():
+        for row in csv.DictReader(path.open(encoding="utf-8")):
+            rows[row["run_id"]].append(row)
+    return rows
+
+
+def quantile(values: list[float], q: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int(q * (len(ordered) - 1) + 0.5))]
+
+
+def cell_stats(records: list[dict], client: dict, server: dict) -> dict:
+    """One run = one cell here (single repetition); statistics are over its requests."""
+    by_cell = defaultdict(list)
+    for r in records:
+        by_cell[(r["mode"], r["operation"], r["object_size_bytes"], r["concurrency"])].append(r)
+    stats = {}
+    for key, rows in by_cell.items():
+        totals = [r["total_ns"] / 1e6 for r in rows]
+        start = min(r["ts_start_utc_ns"] for r in rows)
+        end = max(r["ts_start_utc_ns"] + r["total_ns"] for r in rows)
+        window = max(1e-9, (end - start) / 1e9)
+        run_id = rows[0]["run_id"]
+        cpu = [float(s["proc_cpu_pct"]) for s in client.get(run_id, []) if s["proc_cpu_pct"]]
+        scpu = [float(s["proc_cpu_pct"]) for s in server.get(run_id, []) if s["proc_cpu_pct"]]
+        rss = [float(s["proc_rss_bytes"]) for s in client.get(run_id, [])]
+        stats[key] = {
+            "n": len(rows),
+            "median_ms": statistics.median(totals),
+            "p95_ms": quantile(totals, 0.95),
+            "p99_ms": quantile(totals, 0.99),
+            "handshake_median_ms": statistics.median(
+                (r["ke_ns"] + r["kdf_ns"]) / 1e6 for r in rows),
+            "stage_mean_ms": {s: statistics.fmean(r[s] for r in rows) / 1e6 for s, _ in STAGES},
+            "ops_per_s": len(rows) / window,
+            "mib_per_s": len(rows) * key[2] / MIB / window,
+            "cpu_ms_per_req": statistics.fmean(r["cpu_thread_ns"] for r in rows) / 1e6,
+            "client_cpu_pct": statistics.fmean(cpu) if cpu else float("nan"),
+            "server_cpu_pct": statistics.fmean(scpu) if scpu else float("nan"),
+            "client_rss_mib": max(rss) / MIB if rss else float("nan"),
+            "metadata_bytes": statistics.median(r["metadata_bytes"] for r in rows),
+        }
+    return stats
+
+
+# ------------------------------------------------------------------ outputs
+
+class Numbers:
+    """Collects \\newcommand macros so the text quotes generated values only."""
+
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def add(self, name: str, value, fmt: str = "{:.1f}") -> None:
+        text = fmt.format(value) if not isinstance(value, str) else value
+        self.lines.append(f"\\newcommand{{\\{name}}}{{{text}}}")
+
+    def write(self, path: Path) -> None:
+        path.write_text("% Generated by analysis/make_paper_assets.py -- do not edit.\n"
+                        + "\n".join(self.lines) + "\n", encoding="utf-8")
+
+
+def tex_table(path: Path, header: list[str], rows: list[list[str]], align: str) -> None:
+    body = " \\\\\n".join(" & ".join(r) for r in rows)
+    path.write_text(
+        "% Generated by analysis/make_paper_assets.py -- do not edit.\n"
+        f"\\begin{{tabular}}{{{align}}}\n\\toprule\n{' & '.join(header)} \\\\\n\\midrule\n"
+        f"{body} \\\\\n\\bottomrule\n\\end{{tabular}}\n", encoding="utf-8")
+
+
+def fmt(value: float, digits: int = 2) -> str:
+    return "--" if math.isnan(value) else f"{value:.{digits}f}"
+
+
+def fig_latency_by_mode(stats: dict, out: Path, concurrency: int) -> None:
+    panels = [(op, size) for op in ("put", "get") for size in (1024, 1048576)]
+    fig, axes = plt.subplots(1, 4, figsize=(7.1, 1.9), sharey=True)
+    for ax, (op, size) in zip(axes, panels, strict=True):
+        values = [stats.get((m, op, size, concurrency), {}).get("median_ms", float("nan"))
+                  for m in MODES]
+        colors = [SLOT[1] if m in ("P1", "P2") else SLOT[0] for m in MODES]
+        bars = ax.barh(range(len(MODES)), values, color=colors, height=0.62)
+        for bar, value in zip(bars, values, strict=True):
+            ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2, f" {value:.1f}",
+                    va="center", ha="left", fontsize=6.5, color=INK)
+        ax.set_title(f"{op.upper()} {SIZE_LABEL[size]}", fontsize=8, color=INK)
+        ax.set_xlabel("median latency (ms)")
+        ax.set_xlim(0, max(v for v in values if not math.isnan(v)) * 1.35)
+        ax.grid(axis="y", visible=False)
+    axes[0].set_yticks(range(len(MODES)), [MODE_NAME[m] for m in MODES])
+    axes[0].invert_yaxis()
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def fig_stage_breakdown(stats: dict, out: Path, mode: str, op: str, concurrency: int) -> None:
+    """Composition of client-side time (everything except storage), with the storage share
+    printed beside each bar: storage is >90% everywhere and would hide the other stages."""
+    sizes = [s for s in (1024, 65536, 1048576, 16777216) if (mode, op, s, concurrency) in stats]
+    client_stages = STAGES[:4]
+    fig, ax = plt.subplots(figsize=(3.4, 1.9))
+    left = [0.0] * len(sizes)
+    for index, (stage, label) in enumerate(client_stages):
+        shares = []
+        for size in sizes:
+            means = stats[(mode, op, size, concurrency)]["stage_mean_ms"]
+            client_total = sum(means[s] for s, _ in client_stages)
+            shares.append(100 * means[stage] / client_total)
+        ax.barh(range(len(sizes)), shares, left=left, color=SLOT[index], height=0.6,
+                edgecolor="white", linewidth=1.0, label=label)
+        for i, share in enumerate(shares):
+            if share >= 12:
+                ax.text(left[i] + share / 2, i, f"{share:.0f}%", ha="center", va="center",
+                        fontsize=6, color="white" if index in (0, 1) else INK)
+        left = [a + b for a, b in zip(left, shares, strict=True)]
+    for i, size in enumerate(sizes):
+        means = stats[(mode, op, size, concurrency)]["stage_mean_ms"]
+        storage = 100 * means["s3_ns"] / sum(means.values())
+        client_ms = sum(means[s] for s, _ in client_stages)
+        ax.text(101, i, f"{client_ms:.2f} ms client-side\nstorage {storage:.1f}% of total",
+                va="center", ha="left", fontsize=5.5, color=INK2)
+    ax.set_yticks(range(len(sizes)), [SIZE_LABEL[s] for s in sizes])
+    ax.invert_yaxis()
+    ax.set_xlim(0, 100)
+    ax.set_xlabel(f"share of client-side {op.upper()} time, mode {mode} (%)")
+    ax.grid(axis="y", visible=False)
+    ax.legend(ncol=2, fontsize=6, loc="upper center", bbox_to_anchor=(0.5, -0.32))
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def fig_throughput(stats: dict, out: Path) -> None:
+    modes = [("B1", SLOT[0], "o"), ("R1", SLOT[1], "s"), ("P1", SLOT[2], "^")]
+    panels = [("put", 1024, "ops_per_s", "PUT 1 KiB (ops/s)"),
+              ("get", 1024, "ops_per_s", "GET 1 KiB (ops/s)"),
+              ("put", 16777216, "mib_per_s", "PUT 16 MiB (MiB/s)"),
+              ("get", 16777216, "mib_per_s", "GET 16 MiB (MiB/s)")]
+    fig, axes = plt.subplots(1, 4, figsize=(7.1, 1.9))
+    for ax, (op, size, metric, title) in zip(axes, panels, strict=True):
+        for mode, color, marker in modes:
+            points = sorted((c, v[metric]) for (m, o, s, c), v in stats.items()
+                            if m == mode and o == op and s == size)
+            if not points:
+                continue
+            xs, ys = zip(*points, strict=True)
+            ax.plot(xs, ys, color=color, marker=marker, markersize=4, label=mode)
+        ax.set_xscale("log", base=2)
+        ax.set_xticks([1, 4, 16], ["1", "4", "16"])
+        ax.set_xlabel("concurrent workers")
+        ax.set_title(title, fontsize=8, color=INK)
+        ax.set_ylim(bottom=0)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.tight_layout(w_pad=1.0, rect=(0, 0.1, 1, 1))
+    fig.legend(handles, [f"{l} ({MODE_NAME[l].split(' ', 1)[1]})" for l in labels],
+               loc="lower center", ncol=3, fontsize=6.5, bbox_to_anchor=(0.5, 0.0))
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def fig_n1(n1_records: list[dict], out: Path) -> dict:
+    groups = defaultdict(list)
+    for r in n1_records:
+        label = f"B={r['session_bmax']}" if r["mode"] == "N1" else r["mode"]
+        groups[(r["operation"], r["concurrency"], label)].append(r["ke_ns"] / 1e3)
+    means = {k: statistics.fmean(v) for k, v in groups.items()}
+    fig, axes = plt.subplots(1, 2, figsize=(3.4, 1.9), sharey=True)
+    for ax, op in zip(axes, ("put", "get"), strict=True):
+        for index, concurrency in enumerate((1, 8)):
+            xs = [1, 10, 100]
+            ys = [means.get((op, concurrency, f"B={b}"), float("nan")) for b in xs]
+            ax.plot(xs, ys, marker="o", markersize=4, color=SLOT[index],
+                    label=f"N1, {concurrency} worker{'s' if concurrency > 1 else ''}")
+            p1 = means.get((op, concurrency, "P1"))
+            if p1:
+                ax.axhline(p1, color=SLOT[index], linestyle=":", linewidth=1.0)
+        ax.set_xscale("log")
+        ax.set_xticks([1, 10, 100], ["1", "10", "100"])
+        ax.set_xlabel("session bound B")
+        ax.set_title(op.upper(), fontsize=8, color=INK)
+        ax.set_ylim(bottom=0)
+    axes[0].set_ylabel("mean key establishment (µs)")
+    axes[0].legend(fontsize=5.5, loc="upper right")
+    fig.tight_layout(w_pad=0.8)
+    fig.savefig(out)
+    plt.close(fig)
+    return means
+
+
+def fig_memory(memory: dict, out: Path) -> dict:
+    by_size = defaultdict(list)
+    for run in memory["runs"]:
+        by_size[run["size"]].append(run["growth"] / MIB)
+    sizes = sorted(by_size)
+    growth = [min(by_size[s]) for s in sizes]
+    fig, ax = plt.subplots(figsize=(3.4, 1.6))
+    ax.plot([s / MIB for s in sizes], growth, marker="o", markersize=4, color=SLOT[0],
+            label="measured peak RSS growth")
+    ax.plot([s / MIB for s in sizes], [s / MIB for s in sizes], color=INK2, linestyle=":",
+            linewidth=1.0, label="object size (whole-object buffering)")
+    for s, g in zip(sizes, growth, strict=True):
+        ax.annotate(f"{g:.0f}", (s / MIB, g), textcoords="offset points", xytext=(0, 5),
+                    ha="center", fontsize=6, color=INK)
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log", base=2)
+    ticks = [s / MIB for s in sizes]
+    ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
+    ax.set_yticks([1, 4, 16, 64, 256], ["1", "4", "16", "64", "256"])
+    ax.minorticks_off()
+    ax.set_xlabel("object size (MiB)")
+    ax.set_ylabel("MiB")
+    ax.legend(fontsize=6, loc="upper left")
+    fig.savefig(out)
+    plt.close(fig)
+    return dict(zip(sizes, growth, strict=True))
+
+
+# ------------------------------------------------------------------ main
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--experiment", type=Path, required=True)
+    parser.add_argument("--n1", type=Path, required=True)
+    parser.add_argument("--micro", type=Path, required=True)
+    parser.add_argument("--memory", type=Path, required=True)
+    parser.add_argument("--out", type=Path, default=Path("paper/generated"))
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    num = Numbers()
+
+    # --- main experiment
+    import yaml
+    manifest = yaml.safe_load((args.experiment / "run-manifest.yaml").read_text())
+    env = manifest["environment"]
+    records = load_records(args.experiment)
+    stats = cell_stats(records, load_samples(args.experiment / "client-samples.csv"),
+                       load_samples(args.experiment / "server-samples.csv"))
+    num.add("ExpRuns", len(manifest["runs"]), "{:d}")
+    num.add("ExpRequests", len(records), "{:,}")
+    num.add("ExpCPU", env["cpu_model"].replace("Apple ", ""), "{}")
+    num.add("ExpCores", env["logical_cores"], "{:d}")
+    num.add("ExpRAMGiB", env["ram_bytes"] / 2**30, "{:.0f}")
+    num.add("ExpPython", env["python"], "{}")
+    num.add("ExpLiboqs", env["liboqs_version"], "{}")
+    num.add("ExpCommit", manifest["git_commit"][:7], "{}")
+
+    fig_latency_by_mode(stats, args.out / "fig-latency-by-mode.pdf", 1)
+    fig_stage_breakdown(stats, args.out / "fig-stages-p1-put.pdf", "P1", "put", 1)
+    fig_throughput(stats, args.out / "fig-throughput.pdf")
+
+    # Table: 1 MiB at c=1, all modes, PUT and GET
+    rows = []
+    for m in MODES:
+        row = [MODE_NAME[m]]
+        for op in ("put", "get"):
+            s = stats.get((m, op, 1048576, 1))
+            base = stats.get(("B1", op, 1048576, 1))
+            row += [fmt(s["median_ms"]), fmt(s["p99_ms"]), fmt(s["handshake_median_ms"], 3),
+                    "--" if m == "B1" else f"{100 * (s['median_ms'] / base['median_ms'] - 1):+.1f}"]
+        rows.append(row)
+    tex_table(args.out / "tab-latency-1mib.tex",
+              ["Mode", "PUT p50", "PUT p99", "PUT hs.", "vs B1 \\%",
+               "GET p50", "GET p99", "GET hs.", "vs B1 \\%"], rows, "lrrrrrrrr")
+
+    # Table: resources at c=16, 1 MiB PUT
+    rows = []
+    for m in MODES:
+        s = stats.get((m, "put", 1048576, 16))
+        rows.append([MODE_NAME[m], fmt(s["mib_per_s"], 1), fmt(s["cpu_ms_per_req"], 2),
+                     fmt(s["client_cpu_pct"], 0), fmt(s["server_cpu_pct"], 0),
+                     fmt(s["client_rss_mib"], 0)])
+    tex_table(args.out / "tab-resources.tex",
+              ["Mode", "MiB/s", "CPU ms/req", "Client CPU \\%", "Server CPU \\%",
+               "Client RSS MiB"], rows, "lrrrrr")
+
+    # Metadata bytes per object (1 KiB PUT, c=1)
+    rows = []
+    for m in MODES:
+        s = stats.get((m, "put", 1024, 1))
+        rows.append([MODE_NAME[m], f"{s['metadata_bytes']:.0f}"])
+    tex_table(args.out / "tab-metadata.tex", ["Mode", "Manifest bytes"], rows, "lr")
+
+    # Quoted numbers from the main experiment
+    def med(m, op, size, c):
+        return stats[(m, op, size, c)]["median_ms"]
+
+    for op in ("put", "get"):
+        opn = op.capitalize()
+        for size, tag in ((1024, "Small"), (1048576, "Mid")):
+            p1, b2, r1, b1 = (med(m, op, size, 1) for m in ("P1", "B2", "R1", "B1"))
+            num.add(f"Ovh{opn}{tag}PoneBtwo", 100 * (p1 / b2 - 1), "{:+.1f}")
+            num.add(f"Ovh{opn}{tag}PoneBone", 100 * (p1 / b1 - 1), "{:+.1f}")
+            num.add(f"Ovh{opn}{tag}RoneBone", 100 * (r1 / b1 - 1), "{:+.1f}")
+            num.add(f"Lat{opn}{tag}Pone", p1, "{:.2f}")
+            num.add(f"Lat{opn}{tag}Rone", r1, "{:.2f}")
+    for size, tag in ((1024, "Small"), (16777216, "Large")):
+        means = stats[("P1", "put", size, 1)]["stage_mean_ms"]
+        client_total = sum(v for k, v in means.items() if k != "s3_ns")
+        for stage, short in (("ke_ns", "KE"), ("ser_ns", "Ser"), ("aead_ns", "Aead")):
+            num.add(f"ClientShare{short}{tag}", 100 * means[stage] / client_total, "{:.0f}")
+        num.add(f"KEShare{tag}", 100 * means["ke_ns"] / sum(means.values()), "{:.1f}")
+        num.add(f"StorageShare{tag}", 100 * means["s3_ns"] / sum(means.values()), "{:.1f}")
+
+    # --- micro-benchmarks
+    micro = json.loads(args.micro.read_text())["results"]
+    rows = []
+    for m in ("B1", "R1", "B2", "P1", "P2"):
+        rows.append([MODE_NAME[m], fmt(micro[f"{m}.establish"]["median_us"], 1),
+                     fmt(micro[f"{m}.recover"]["median_us"], 1)])
+    for b in (10, 100):
+        rows.append([f"N1, B={b} (amortized)", fmt(micro[f"N1-B{b}.establish"]["median_us"], 1),
+                     "--"])
+    tex_table(args.out / "tab-micro.tex", ["Mode", "Sender (µs)", "Receiver (µs)"], rows, "lrr")
+    num.add("MicroPoneEnc", micro["P1.establish"]["median_us"])
+    num.add("MicroPoneDec", micro["P1.recover"]["median_us"])
+    num.add("MicroRoneEnc", micro["R1.establish"]["median_us"])
+    num.add("MicroRoneDec", micro["R1.recover"]["median_us"], "{:,.0f}")
+    num.add("MicroBtwoEnc", micro["B2.establish"]["median_us"])
+    num.add("MicroBtwoDec", micro["B2.recover"]["median_us"])
+    num.add("MicroPtwoEnc", micro["P2.establish"]["median_us"])
+    num.add("MicroRoneOverPone", micro["R1.recover"]["median_us"] / micro["P1.recover"]["median_us"],
+            "{:.0f}")
+    num.add("MicroHKDF", micro["HKDF-SHA256.derive"]["median_us"])
+    num.add("MicroAESGiBs", 4 / 1024 / (micro["AES-256-GCM.encrypt-4MiB"]["median_us"] / 1e6),
+            "{:.1f}")
+
+    # --- N1 experiment
+    n1_means = fig_n1(load_records(args.n1), args.out / "fig-n1.pdf")
+    for op in ("put", "get"):
+        p1 = n1_means[(op, 8, "P1")]
+        num.add(f"NOne{op.capitalize()}ReductionHundred", p1 / n1_means[(op, 8, "B=100")],
+                "{:.1f}")
+        num.add(f"NOne{op.capitalize()}ReductionTen", p1 / n1_means[(op, 8, "B=10")], "{:.1f}")
+
+    # --- memory
+    growth = fig_memory(json.loads(args.memory.read_text()), args.out / "fig-memory.pdf")
+    sizes = sorted(growth)
+    num.add("MemSmallest", growth[sizes[0]], "{:.0f}")
+    num.add("MemLargest", growth[sizes[-1]], "{:.0f}")
+    num.add("MemLargestSize", sizes[-1] / MIB, "{:.0f}")
+    num.add("MemSmallestSize", sizes[0] / MIB, "{:.0f}")
+
+    num.write(args.out / "numbers.tex")
+    (args.out / "summary.json").write_text(json.dumps(
+        {f"{k[0]}|{k[1]}|{k[2]}|{k[3]}": v for k, v in stats.items()}, indent=1))
+    print(f"wrote assets to {args.out}")
+
+
+if __name__ == "__main__":
+    main()
