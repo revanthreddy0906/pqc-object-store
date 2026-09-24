@@ -54,6 +54,24 @@ def aad(context_bytes: bytes, index: int, length: int, final: bool) -> bytes:
     return context_bytes + index.to_bytes(8, "big") + length.to_bytes(4, "big") + bytes([final])
 
 
+def _read_exact(reader: BinaryIO, length: int) -> bytes:
+    """Read `length` bytes, tolerating short reads; fewer only at end of input."""
+    if length == 0:
+        return b""
+    first = reader.read(length)
+    if len(first) == length or not first:
+        return first
+    parts = [first]
+    remaining = length - len(first)
+    while remaining:
+        piece = reader.read(remaining)
+        if not piece:
+            break
+        parts.append(piece)
+        remaining -= len(piece)
+    return b"".join(parts)
+
+
 class ChunkEncryptor:
     """Yields encrypted records for a plaintext stream; accumulates AEAD time in `aead_ns`."""
 
@@ -72,17 +90,19 @@ class ChunkEncryptor:
     def records(self, reader: BinaryIO) -> Iterator[bytes]:
         for index in range(self.chunk_count):
             length = chunk_length(index, self._size, self._chunk_size)
-            plaintext = reader.read(length) if length else b""
+            plaintext = _read_exact(reader, length)
             if len(plaintext) != length:
                 raise ValueError(f"plaintext ended early at chunk {index}")
             final = index == self.chunk_count - 1
+            # Check for surplus input before sealing the final chunk: consumers such as an
+            # S3 upload stop pulling records once they have the declared length.
+            if final and _read_exact(reader, 1):
+                raise ValueError("plaintext is longer than plaintext_size")
             start = time.perf_counter_ns()
             record = self._aesgcm.encrypt(nonce(self._prefix, index), plaintext,
                                           aad(self._context, index, length, final))
             self.aead_ns += time.perf_counter_ns() - start
             yield record
-        if reader.read(1):
-            raise ValueError("plaintext is longer than plaintext_size")
 
 
 class ChunkDecryptor:

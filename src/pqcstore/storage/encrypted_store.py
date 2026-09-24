@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import BinaryIO
 
 from minio.error import S3Error
@@ -32,6 +33,21 @@ MANIFEST = "manifest.json"
 
 class ObjectNotFound(LookupError):
     pass
+
+
+class CommitVerificationError(RuntimeError):
+    """A committed version does not match what was written (read-after-write check)."""
+
+
+@dataclass
+class Audit:
+    committed: list[str] = field(default_factory=list)
+    orphaned_data: list[tuple[str, datetime]] = field(default_factory=list)  # data, no manifest
+    dangling_manifests: list[str] = field(default_factory=list)  # manifest, no data
+
+    @property
+    def clean(self) -> bool:
+        return not self.orphaned_data and not self.dangling_manifests
 
 
 def version_prefix(object_key: str, version: str) -> str:
@@ -86,9 +102,15 @@ class EncryptedObjectStore:
         stored = ciphertext_size(plaintext_size, chunk_size)
 
         upload_start = time.perf_counter_ns()
-        self.store.put_stream(bucket, prefix + DATA, _IterReader(encryptor.records(reader)),
-                              length=stored)
-        self.store.put_bytes(bucket, prefix + MANIFEST, manifest_bytes, "application/json")
+        try:
+            self.store.put_stream(bucket, prefix + DATA, _IterReader(encryptor.records(reader)),
+                                  length=stored)
+            self.store.put_bytes(bucket, prefix + MANIFEST, manifest_bytes, "application/json")
+        except BaseException as exc:
+            # minio-py already aborted any multipart upload; remove what may have landed.
+            # The manifest goes first so the version can never look committed.
+            self._remove_quietly(bucket, prefix, exc)
+            raise
         # AEAD runs inside the upload's read() calls; subtract it to isolate transfer time.
         stages.aead_ns = encryptor.aead_ns
         stages.s3_ns = time.perf_counter_ns() - upload_start - encryptor.aead_ns
@@ -97,6 +119,61 @@ class EncryptedObjectStore:
         result.stored_bytes = stored
         result.metadata_bytes = len(manifest_bytes)
         return result
+
+    def verify_committed(self, result: TransferResult) -> None:
+        """Read-after-write check: both objects exist with the sizes that were written.
+        Not part of the timed PUT path."""
+        identity = result.identity
+        prefix = version_prefix(identity.object_key, identity.object_version)
+        for name, expected in ((DATA, result.stored_bytes), (MANIFEST, result.metadata_bytes)):
+            actual = self.store.stat_size(identity.bucket, prefix + name)
+            if actual != expected:
+                raise CommitVerificationError(
+                    f"{identity.bucket}/{prefix}{name}: stored {actual} B, expected {expected} B")
+
+    def delete_version(self, bucket: str, object_key: str, version: str) -> None:
+        """Uncommit first (manifest), then remove the data."""
+        prefix = version_prefix(object_key, version)
+        self.store.delete(bucket, prefix + MANIFEST)
+        self.store.delete(bucket, prefix + DATA)
+
+    def _remove_quietly(self, bucket: str, prefix: str, cause: BaseException) -> None:
+        for name in (MANIFEST, DATA):
+            try:
+                self.store.delete(bucket, prefix + name)
+            except Exception as cleanup_error:  # noqa: BLE001 - report, never mask the cause
+                cause.add_note(f"cleanup of {prefix}{name} failed: {cleanup_error!r}; "
+                               "collect_garbage() will remove it")
+
+    def audit(self, bucket: str, prefix: str = "") -> Audit:
+        """Classify every version directory under `prefix` (an object-key prefix)."""
+        versions: dict[str, dict[str, datetime]] = {}
+        for obj in self.store.client.list_objects(bucket, prefix=prefix, recursive=True):
+            head, _, name = obj.object_name.rpartition("/")  # head = <key>.pqcs/<version>
+            if name not in (DATA, MANIFEST) or not head.rpartition("/")[0].endswith(SUFFIX):
+                continue
+            versions.setdefault(head + "/", {})[name] = obj.last_modified
+        report = Audit()
+        for version_dir, files in sorted(versions.items()):
+            if MANIFEST in files and DATA in files:
+                report.committed.append(version_dir)
+            elif DATA in files:
+                report.orphaned_data.append((version_dir, files[DATA]))
+            else:
+                report.dangling_manifests.append(version_dir)
+        return report
+
+    def collect_garbage(self, bucket: str, prefix: str = "",
+                        older_than: timedelta = timedelta(hours=1)) -> list[str]:
+        """Delete data objects that never got a manifest. The age threshold protects
+        uploads that are still in flight."""
+        cutoff = datetime.now(UTC) - older_than
+        removed = []
+        for version_dir, modified in self.audit(bucket, prefix).orphaned_data:
+            if modified <= cutoff:
+                self.store.delete(bucket, version_dir + DATA)
+                removed.append(version_dir)
+        return removed
 
     def committed_versions(self, bucket: str, object_key: str) -> list[str]:
         prefix = f"{object_key}{SUFFIX}/"

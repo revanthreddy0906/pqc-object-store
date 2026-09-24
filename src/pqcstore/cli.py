@@ -97,9 +97,11 @@ def cmd_put(args: argparse.Namespace) -> int:
     store = MinioStore(settings)
     store.ensure_bucket(args.bucket)
     path = Path(args.input)
+    estore = EncryptedObjectStore(store)
     with path.open("rb") as reader:
-        result = EncryptedObjectStore(store).put(args.bucket, args.key, reader,
-                                                 path.stat().st_size, public_key, args.chunk_size)
+        result = estore.put(args.bucket, args.key, reader, path.stat().st_size, public_key,
+                            args.chunk_size)
+    estore.verify_committed(result)
     _print_result("PUT", result)
     return 0
 
@@ -133,6 +135,81 @@ def cmd_get(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_soak(args: argparse.Namespace) -> int:
+    """Phase 3 exit check: N consecutive encrypted round trips, then a clean audit."""
+    import io
+    import statistics
+
+    from pqcstore.crypto import envelope, mlkem
+    from pqcstore.storage.encrypted_store import EncryptedObjectStore
+    from pqcstore.storage.minio_store import MinioStore
+
+    settings = Settings.from_env()
+    store = MinioStore(settings)
+    store.ensure_bucket(args.bucket)
+    estore = EncryptedObjectStore(store)
+    envelope.warm_up()
+    pair = mlkem.generate_keypair()  # ephemeral test recipient; never written to disk
+    sizes = [int(s) for s in args.sizes.split(",")]
+    prefix = f"soak/{uuid.uuid4()}/"
+    failures, totals = [], {"put": [], "get": []}
+    written = []
+    for run in range(args.runs):
+        size = sizes[run % len(sizes)]
+        payload = os.urandom(size)
+        key = f"{prefix}obj-{run:04d}"
+        try:
+            put = estore.put(args.bucket, key, io.BytesIO(payload), size, pair.public_key,
+                             args.chunk_size)
+            written.append((key, put.identity.object_version))
+            estore.verify_committed(put)
+            sink = io.BytesIO()
+            got = estore.get(args.bucket, key, pair.private_key, sink,
+                             put.identity.object_version)
+            if hashlib.sha256(sink.getvalue()).digest() != hashlib.sha256(payload).digest():
+                raise AssertionError("plaintext mismatch")
+            totals["put"].append(put.stages.total_ns)
+            totals["get"].append(got.stages.total_ns)
+        except Exception as exc:  # noqa: BLE001 - count every failure, keep going
+            failures.append(f"run {run} size {size}: {exc!r}")
+    audit = estore.audit(args.bucket, prefix)
+    ok = not failures and audit.clean and len(audit.committed) == args.runs
+    print(f"runs={args.runs} failures={len(failures)} committed={len(audit.committed)} "
+          f"orphaned_data={len(audit.orphaned_data)} "
+          f"dangling_manifests={len(audit.dangling_manifests)}")
+    for op, values in totals.items():
+        if values:
+            print(f"  {op} median {statistics.median(values) / 1e6:.2f} ms "
+                  f"max {max(values) / 1e6:.2f} ms (dev laptop, not a result)")
+    for failure in failures[:10]:
+        print("  FAIL", failure)
+    if not args.keep:
+        for key, version in written:
+            estore.delete_version(args.bucket, key, version)
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    from datetime import timedelta
+
+    from pqcstore.storage.encrypted_store import EncryptedObjectStore
+    from pqcstore.storage.minio_store import MinioStore
+
+    estore = EncryptedObjectStore(MinioStore(Settings.from_env()))
+    audit = estore.audit(args.bucket, args.prefix)
+    print(f"committed={len(audit.committed)} orphaned_data={len(audit.orphaned_data)} "
+          f"dangling_manifests={len(audit.dangling_manifests)}")
+    for version_dir in audit.dangling_manifests:
+        print(f"  WARNING manifest without data: {version_dir}")
+    if args.dry_run:
+        return 0
+    removed = estore.collect_garbage(args.bucket, args.prefix,
+                                     timedelta(minutes=args.older_than_minutes))
+    print(f"removed {len(removed)} orphaned data object(s)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pqcstore")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -162,6 +239,22 @@ def main(argv: list[str] | None = None) -> int:
     get.add_argument("--recipient-private-key", required=True)
     get.add_argument("--version", help="default: latest committed version")
     get.set_defaults(func=cmd_get)
+
+    soak = sub.add_parser("soak", help="N consecutive encrypted round trips + audit (Phase 3)")
+    soak.add_argument("--bucket", default="pqc-bench")
+    soak.add_argument("--runs", type=int, default=100)
+    soak.add_argument("--sizes", default="0,1,1048576,4194303,4194304,4194305,9437184",
+                      help="comma-separated plaintext sizes, cycled")
+    soak.add_argument("--chunk-size", type=int, default=4 * 1024 * 1024)
+    soak.add_argument("--keep", action="store_true", help="keep the objects afterwards")
+    soak.set_defaults(func=cmd_soak)
+
+    gc = sub.add_parser("gc", help="report and remove uncommitted (orphaned) data objects")
+    gc.add_argument("--bucket", default="pqc-bench")
+    gc.add_argument("--prefix", default="")
+    gc.add_argument("--older-than-minutes", type=int, default=60)
+    gc.add_argument("--dry-run", action="store_true")
+    gc.set_defaults(func=cmd_gc)
     args = parser.parse_args(argv)
     return args.func(args)
 

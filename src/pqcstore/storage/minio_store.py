@@ -59,6 +59,9 @@ class MinioStore:
             response.close()
             response.release_conn()
 
+    def stat_size(self, bucket: str, key: str) -> int:
+        return self.client.stat_object(bucket, key).size
+
     def delete(self, bucket: str, key: str) -> None:
         self.client.remove_object(bucket, key)
 

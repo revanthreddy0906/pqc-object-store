@@ -1,7 +1,11 @@
 import os
 import uuid
+from pathlib import Path
 
 import pytest
+
+# Tests always use the repo's pinned liboqs build, however pytest is started.
+os.environ.setdefault("OQS_INSTALL_PATH", str(Path(__file__).parents[1] / ".local" / "liboqs"))
 
 from pqcstore.crypto import mlkem
 from pqcstore.crypto.manifest import ObjectIdentity, new_version

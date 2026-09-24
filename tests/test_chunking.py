@@ -78,3 +78,31 @@ def test_aead_time_is_accumulated():
     enc = ca.ChunkEncryptor(KEY, PREFIX, CONTEXT, 4 * CHUNK, CHUNK)
     b"".join(enc.records(io.BytesIO(os.urandom(4 * CHUNK))))
     assert enc.aead_ns > 0
+
+
+class Trickle(io.RawIOBase):
+    """Returns at most 100 bytes per read, like a pipe or socket."""
+
+    def __init__(self, data: bytes) -> None:
+        self._data = io.BytesIO(data)
+
+    def readable(self) -> bool:
+        return True
+
+    def read(self, size: int = -1) -> bytes:
+        return self._data.read(100 if size < 0 else min(size, 100))
+
+
+def test_short_reads_are_tolerated():
+    plaintext = os.urandom(3 * CHUNK + 5)
+    enc = ca.ChunkEncryptor(KEY, PREFIX, CONTEXT, len(plaintext), CHUNK)
+    ciphertext = b"".join(enc.records(Trickle(plaintext)))
+    assert decrypt([ciphertext], len(plaintext)) == plaintext
+
+
+def test_surplus_input_is_detected_before_final_record():
+    enc = ca.ChunkEncryptor(KEY, PREFIX, CONTEXT, 2 * CHUNK, CHUNK)
+    records = enc.records(io.BytesIO(os.urandom(2 * CHUNK + 1)))
+    next(records)  # first record is fine
+    with pytest.raises(ValueError, match="longer"):
+        next(records)  # the final record is never produced
