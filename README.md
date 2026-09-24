@@ -20,8 +20,9 @@ timers or the experiment matrix.
 | 2 | Crypto MVP: ML-KEM-768 + HKDF + chunked AES-256-GCM (mode P1), tamper tests, milestone M1 | done |
 | 3 | Commit-protocol hardening: failure cleanup, read-after-write check, orphan audit/GC, 100-run soak | done |
 | 4 | Streaming: 500 MiB round trips, memory flat in object size (~50 MiB per transfer) | done |
-| 5 | Baselines (B0, B1, R1, B2) on the same data path, benchmark runner, samplers | next |
-| 6–8 | Pilot, candidate algorithm (N1), final runs | planned |
+| 5 | Modes B0/B1/R1/B2/P1/P2 on one data path; multi-process benchmark runner (closed/open loop); client + server samplers; record validator | done |
+| 6 | Pilot matrix on two Linux VMs (`config/pilot.yaml`) | next — needs VMs |
+| 7–8 | Candidate algorithm (N1), final runs | planned |
 
 ## Milestone M1: encrypted round trip
 
@@ -56,6 +57,8 @@ make s3-smoke       # raw 1 MiB upload/download, SHA-256 must match
 make test           # unit + integration tests
 make soak           # 100 encrypted round trips, then checks for orphaned versions
 make stream-check   # 16/128/500 MiB round trips; memory growth must not depend on size
+make bench-smoke    # every mode through the benchmark runner (~6 min, dev only)
+make validate-results  # schema, checksums and timer arithmetic of the newest run
 ```
 
 Always run Python through the Makefile targets, or export `OQS_INSTALL_PATH=$PWD/.local/liboqs`
@@ -77,8 +80,9 @@ scripts/           liboqs build script
 src/pqcstore/
   crypto/          ML-KEM adapter, HKDF, chunked AES-GCM, manifest, envelope (P1)
   storage/         MinIO adapter, encrypted store with manifest-as-commit
-  benchmark/       payload pool (streamed test data), memory probe
-  cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, gc
+  benchmark/       runner, samplers, validator, payload pool, memory probe
+  cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, bench, validate, gc
+config/            experiment configurations (development, pilot)
 tests/             crypto, tamper, binding, hygiene and MinIO integration tests
 experiments/       raw experiment output (git-ignored)
 ```

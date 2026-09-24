@@ -24,8 +24,8 @@ from pqcstore.crypto import envelope
 from pqcstore.crypto.chunked_aead import DEFAULT_CHUNK_SIZE, stored_size
 from pqcstore.crypto.manifest import ObjectIdentity, new_version
 from pqcstore.crypto.modes import MODES, RecipientPrivate, RecipientPublic
-from pqcstore.storage.minio_store import MinioStore
-from pqcstore.timing import Stages
+from pqcstore.storage.minio_store import DEFAULT_PART_SIZE, MinioStore
+from pqcstore.timing import Stages, measure
 
 SUFFIX = ".pqcs"
 DATA = "data.enc"
@@ -101,9 +101,11 @@ class TransferResult:
 
 
 class EncryptedObjectStore:
-    def __init__(self, store: MinioStore, tenant: str = "research") -> None:
+    def __init__(self, store: MinioStore, tenant: str = "research",
+                 part_size: int = DEFAULT_PART_SIZE) -> None:
         self.store = store
         self.tenant = tenant
+        self.part_size = part_size
 
     def put(self, bucket: str, object_key: str, reader: BinaryIO, plaintext_size: int,
             recipient: RecipientPublic | bytes, chunk_size: int = DEFAULT_CHUNK_SIZE,
@@ -111,9 +113,10 @@ class EncryptedObjectStore:
         """Encrypt and upload a new version. Time spent in `reader.read` is counted in
         s3_ns, so timed runs read from the in-memory payload pool."""
         start = time.perf_counter_ns()
-        identity = ObjectIdentity(self.tenant, bucket, object_key, new_version())
-        result = TransferResult(identity)
-        stages = result.stages
+        stages = Stages()
+        with measure(stages, "ser_ns"):  # object metadata: new version and identity
+            identity = ObjectIdentity(self.tenant, bucket, object_key, new_version())
+        result = TransferResult(identity, stages)
         manifest_bytes, encryptor = envelope.seal(recipient, identity, plaintext_size, stages,
                                                   chunk_size, mode)
         prefix = version_prefix(object_key, identity.object_version)
@@ -122,7 +125,7 @@ class EncryptedObjectStore:
         upload_start = time.perf_counter_ns()
         try:
             self.store.put_stream(bucket, prefix + DATA, _IterReader(encryptor.records(reader)),
-                                  length=stored)
+                                  length=stored, part_size=self.part_size)
             self.store.put_bytes(bucket, prefix + MANIFEST, manifest_bytes, "application/json")
         except BaseException as exc:
             # minio-py already aborted any multipart upload; remove what may have landed.

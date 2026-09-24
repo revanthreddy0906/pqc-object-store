@@ -1,0 +1,27 @@
+# Smoke test of the benchmark pipeline on a development machine (a few minutes).
+# Numbers from this config are never reported (SoT D13).
+experiment_id: dev-smoke
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 1
+warmup_s: 1
+duration_s: 3
+get_objects: 4
+pool_bytes: 16777216
+seed: 20260924
+blocks:
+  - sizes: [1024, 1048576]
+    concurrency: [1, 8]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1, P2]
+  - sizes: [65536]
+    concurrency: [4]
+    operations: [mix]
+    modes: [B1, P1]
+  - loop: open
+    sizes: [1024]
+    rates: [50]
+    threads: 16
+    operations: [put]
+    modes: [B1, P1]

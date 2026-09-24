@@ -216,6 +216,34 @@ def cmd_stream_check(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_bench(args: argparse.Namespace) -> int:
+    from pqcstore.benchmark.runner import run_experiment
+
+    run_dir, outcomes = run_experiment(Path(args.config), Path(args.out))
+    invalid = [o.run_id for o in outcomes if not o.valid]
+    print(f"wrote {run_dir} ({len(outcomes)} runs, {len(invalid)} invalid)")
+    return 1 if invalid else 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    from pqcstore.benchmark.validate import validate
+
+    report = validate(Path(args.run_dir))
+    print(f"records={report.records} measured_ok={report.measured} "
+          f"failures={dict(report.failures)} worst_run_p99_T_other={report.max_other_fraction:.3%} "
+          f"outlier_requests={report.outlier_requests} "
+          f"timer_violations={report.timer_violation_count} "
+          f"schema_errors={report.schema_error_count}")
+    for label, problems in (("checksum", report.checksum_errors),
+                            ("invalid run", report.invalid_runs),
+                            ("schema", report.schema_errors),
+                            ("timer", report.timer_violations)):
+        for problem in problems[:10]:
+            print(f"  {label}: {problem}")
+    print("VALID" if report.ok else "INVALID")
+    return 0 if report.ok else 1
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     from datetime import timedelta
 
@@ -284,6 +312,15 @@ def main(argv: list[str] | None = None) -> int:
     stream.add_argument("--tolerance-mib", type=int, default=32,
                         help="allowed growth difference between smallest and largest size")
     stream.set_defaults(func=cmd_stream_check)
+
+    bench = sub.add_parser("bench", help="run an experiment configuration")
+    bench.add_argument("--config", required=True)
+    bench.add_argument("--out", default="experiments")
+    bench.set_defaults(func=cmd_bench)
+
+    validate = sub.add_parser("validate", help="validate an experiment output directory")
+    validate.add_argument("run_dir")
+    validate.set_defaults(func=cmd_validate)
 
     gc = sub.add_parser("gc", help="report and remove uncommitted (orphaned) data objects")
     gc.add_argument("--bucket", default="pqc-bench")

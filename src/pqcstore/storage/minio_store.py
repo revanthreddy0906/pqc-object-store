@@ -10,6 +10,7 @@ import io
 from collections.abc import Iterator
 from typing import BinaryIO
 
+import urllib3
 from minio import Minio
 
 from pqcstore.settings import Settings
@@ -19,13 +20,25 @@ DEFAULT_PART_SIZE = 8 * 1024 * 1024
 READ_SIZE = 1024 * 1024
 
 
+def benchmark_http_client(connections: int) -> urllib3.PoolManager:
+    """HTTP pool for benchmark workers: one connection per thread, and no automatic
+    retries, so failures are counted instead of hidden inside latency (SoT §8.1)."""
+    return urllib3.PoolManager(
+        maxsize=max(10, connections),
+        block=False,
+        timeout=urllib3.Timeout(connect=10, read=300),
+        retries=urllib3.Retry(total=0, redirect=0),
+    )
+
+
 class MinioStore:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, http_client: urllib3.PoolManager | None = None) -> None:
         self.client = Minio(
             settings.s3_endpoint,
             access_key=settings.s3_access_key,
             secret_key=settings.s3_secret_key,
             secure=settings.s3_secure,
+            http_client=http_client,
         )
 
     def ensure_bucket(self, bucket: str) -> None:

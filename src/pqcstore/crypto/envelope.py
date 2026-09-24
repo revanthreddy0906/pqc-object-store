@@ -65,9 +65,10 @@ def seal(recipient: RecipientPublic | bytes, identity: ObjectIdentity, plaintext
                                 spec.key_id(public), ke_ct)
         context_bytes = canonical_json(context)
     if spec.encrypts:
-        with measure(stages, "kdf_ns"):
+        with measure(stages, "kdf_ns"):  # key derivation and the AES key schedule
             object_key = derive_object_key(ikm, salt, context_bytes)
-        encryptor = ChunkEncryptor(object_key, prefix, context_bytes, plaintext_size, chunk_size)
+            encryptor = ChunkEncryptor(object_key, prefix, context_bytes, plaintext_size,
+                                       chunk_size)
     else:
         encryptor = PlainChunker(plaintext_size, chunk_size)
     with measure(stages, "ser_ns"):
@@ -86,10 +87,10 @@ def open_manifest(recipient: RecipientPrivate | bytes, manifest_bytes: bytes,
         return PlainChunker(manifest.plaintext_size, manifest.chunk_size)
     with measure(stages, "ke_ns"):
         ikm = spec.recover(as_private(recipient), manifest.ke_ct)
-    with measure(stages, "kdf_ns"):
+    with measure(stages, "kdf_ns"):  # key derivation and the AES key schedule
         object_key = derive_object_key(ikm, manifest.salt, manifest.context_bytes)
-    return ChunkDecryptor(object_key, manifest.nonce_prefix, manifest.context_bytes,
-                          manifest.plaintext_size, manifest.chunk_size)
+        return ChunkDecryptor(object_key, manifest.nonce_prefix, manifest.context_bytes,
+                              manifest.plaintext_size, manifest.chunk_size)
 
 
 def encrypt_bytes(recipient: RecipientPublic | bytes, identity: ObjectIdentity, plaintext: bytes,

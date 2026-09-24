@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.2 · 24 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.3 · 24 Sep 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.2 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.3 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -293,7 +293,19 @@ T([["Version", "Date", "Change", "Status"],
     "Pending team review (§1.3)"],
    ["1.2", "24 Sep 2026", "Phase 4 measurement: per-transfer client memory (§9.4) replaced the estimate "
                           "with measured values (~50 MiB per large in-flight transfer, independent of "
-                          "object size).", "Pending team review (§1.3)"]],
+                          "object size).", "Pending team review (§1.3)"],
+   ["1.3", "24 Sep 2026", "Phase 5 implementation: (1) timer-validation rule is per run: no request "
+                          "may show negative unaccounted time (double counting), and per run the p99 "
+                          "of unaccounted/total must be ≤ 2% and the aggregate ≤ 1%; single requests "
+                          "delayed by the OS are counted as outliers, not failures (§8.2, §12.1); "
+                          "(2) worker processes disable the garbage collector during the timed window; "
+                          "(3) object identity creation is timed as SER and the AES key schedule as "
+                          "KDF, so no per-request work is unattributed; (4) the benchmark HTTP client "
+                          "never retries: failures are recorded, not hidden in latency; (5) server "
+                          "CPU/RSS/network are scraped from MinIO's own /minio/v2/metrics/node "
+                          "endpoint, no agent needed (§10); (6) readers must name the expected mode, "
+                          "so a planted B0 object cannot downgrade P1 (§7.6).",
+    "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
 # ================================================================ 2
@@ -1051,7 +1063,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.2",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.3",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

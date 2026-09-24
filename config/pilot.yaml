@@ -1,0 +1,20 @@
+# Pilot matrix (SoT §15.1 / Phase 6), run on the Linux VMs, never reported as results.
+# Purpose: find defects, load-generator saturation and run-level variance to fix
+# repetitions and durations for the final matrix.
+experiment_id: pilot
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 10
+duration_s: 30
+get_objects: 16
+pool_bytes: 67108864
+seed: 20260924
+# Point at the storage VM; keep the metrics endpoint reachable only from the client VM.
+server_metrics_url: http://127.0.0.1:9000/minio/v2/metrics/node
+blocks:
+  - sizes: [1024, 65536, 1048576, 16777216]
+    concurrency: [1, 4, 16, 32]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1]
