@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    env:
+      OQS_INSTALL_PATH: ${{ github.workspace }}/.local/liboqs
+      PQC_REQUIRE_MINIO: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache liboqs build
+        uses: actions/cache@v4
+        with:
+          path: .local/liboqs
+          key: liboqs-0.16.0-${{ runner.os }}-${{ hashFiles('scripts/install_liboqs.sh') }}
+
+      - name: Build liboqs
+        run: bash scripts/install_liboqs.sh
+
+      - name: Install package
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --quiet -e ".[dev]"
+          cp .env.example .env
+          sed -i "s/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)/" .env
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build MinIO from source (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/minio.Dockerfile
+          tags: pqc-minio:RELEASE.2025-10-15T17-29-55Z
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start MinIO
+        run: docker compose up -d --wait minio
+
+      - name: Lint
+        run: .venv/bin/ruff check src tests
+
+      - name: Tests
+        run: .venv/bin/python -m pytest
+
+      - name: Doctor
+        if: always()
+        run: .venv/bin/python -m pqcstore.cli doctor

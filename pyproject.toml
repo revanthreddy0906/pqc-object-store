@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pqcstore"
+version = "0.1.0"
+description = "ML-KEM-768 envelope encryption benchmark for S3-compatible object stores (Team 12)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "liboqs-python==0.16.0.1",
+    "cryptography==50.0.1",
+    "minio==7.2.20",
+    "psutil>=7",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+docs = ["reportlab>=4"]
+
+[project.scripts]
+pqcstore = "pqcstore.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pqcstore"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: needs a running MinIO (make services-up)"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
