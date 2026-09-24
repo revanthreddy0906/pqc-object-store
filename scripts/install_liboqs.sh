@@ -19,16 +19,19 @@ git clone --depth 1 --branch "${LIBOQS_VERSION}" https://github.com/open-quantum
 # OQS_DIST_BUILD: portable binary with runtime CPU-feature dispatch.
 # OQS_USE_OPENSSL=OFF: liboqs uses its own SHA-2/SHA-3/AES, so results do not
 # depend on which OpenSSL the host happens to provide.
+# OQS_MINIMAL_BUILD: only the ML-KEM parameter sets this project can use.
 CMAKE_FLAGS=(
   -DCMAKE_BUILD_TYPE=Release
   -DBUILD_SHARED_LIBS=ON
   -DOQS_BUILD_ONLY_LIB=ON
   -DOQS_DIST_BUILD=ON
   -DOQS_USE_OPENSSL=OFF
+  "-DOQS_MINIMAL_BUILD=KEM_ml_kem_512;KEM_ml_kem_768;KEM_ml_kem_1024"
   -DCMAKE_INSTALL_PREFIX="${PREFIX}"
 )
+JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 cmake -S "${SRC}" -B "${SRC}/build" "${CMAKE_FLAGS[@]}"
-cmake --build "${SRC}/build" --parallel
+cmake --build "${SRC}/build" --parallel "${JOBS}"
 cmake --install "${SRC}/build"
 
 echo "${LIBOQS_VERSION}" > "${PREFIX}/.version"

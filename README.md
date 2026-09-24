@@ -17,8 +17,25 @@ timers or the experiment matrix.
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Environment: pinned liboqs, MinIO from source, raw S3 round trip | done |
-| 2 | Crypto MVP: ML-KEM adapter, HKDF, AES-GCM envelope, tamper tests | next |
-| 3–8 | S3 integration, streaming, baselines, benchmark, pilot, final runs | planned |
+| 2 | Crypto MVP: ML-KEM-768 + HKDF + chunked AES-256-GCM (mode P1), tamper tests, milestone M1 | done |
+| 3 | S3 integration hardening: orphan cleanup, 100-run reliability check | next |
+| 4–8 | Streaming at 500 MiB, baselines, benchmark runner, pilot, final runs | planned |
+
+## Milestone M1: encrypted round trip
+
+```bash
+export OQS_INSTALL_PATH=$PWD/.local/liboqs
+.venv/bin/pqcstore keygen --public keys/recipient.pub --private keys/recipient.key
+.venv/bin/pqcstore put --bucket pqc-bench --key smoke/object-1 \
+    --input fixtures/1MiB.bin --recipient-public-key keys/recipient.pub
+.venv/bin/pqcstore get --bucket pqc-bench --key smoke/object-1 \
+    --output recovered.bin --recipient-private-key keys/recipient.key
+shasum -a 256 fixtures/1MiB.bin recovered.bin
+```
+
+`put` and `get` print per-stage timings. A single CLI call includes one-off process start-up
+costs (first KEM call ~8 ms, versus ~20 µs once warm), so CLI timings are for sanity checks
+only. The benchmark runner measures after an in-process warm-up.
 
 ## Requirements
 
@@ -54,10 +71,10 @@ docker/            MinIO source-build Dockerfile
 docs/              Source of Truth PDF and its generator
 scripts/           liboqs build script
 src/pqcstore/
-  crypto/          liboqs guard (KEM, KDF and AEAD modules follow in Phase 2)
-  storage/         MinIO adapter
-  cli.py           doctor, s3-smoke
-tests/             environment and MinIO integration tests
+  crypto/          ML-KEM adapter, HKDF, chunked AES-GCM, manifest, envelope (P1)
+  storage/         MinIO adapter, encrypted store with manifest-as-commit
+  cli.py           doctor, s3-smoke, keygen, put, get
+tests/             crypto, tamper, binding, hygiene and MinIO integration tests
 experiments/       raw experiment output (git-ignored)
 ```
 

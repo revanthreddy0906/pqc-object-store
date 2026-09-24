@@ -8,6 +8,7 @@ import os
 import platform
 import sys
 import uuid
+from pathlib import Path
 
 from pqcstore.settings import Settings
 
@@ -65,6 +66,69 @@ def cmd_s3_smoke(args: argparse.Namespace) -> int:
     return 0 if sent == got else 1
 
 
+def _print_result(label: str, result) -> None:
+    identity = result.identity
+    print(f"{label} {identity.bucket}/{identity.object_key} version={identity.object_version}")
+    print(f"  plaintext={result.plaintext_bytes} B  stored={result.stored_bytes} B  "
+          f"manifest={result.metadata_bytes} B")
+    for name, value in result.stages.as_dict().items():
+        print(f"  {name:<9} {value / 1e6:10.3f} ms")
+
+
+def cmd_keygen(args: argparse.Namespace) -> int:
+    from pqcstore import keys
+    from pqcstore.crypto import mlkem
+
+    kid = keys.write_keypair(mlkem.generate_keypair(), Path(args.public), Path(args.private))
+    print(f"wrote ML-KEM-768 key pair key_id={kid}")
+    print(f"  public  {args.public}\n  private {args.private} (mode 0600, keep out of Git)")
+    return 0
+
+
+def cmd_put(args: argparse.Namespace) -> int:
+    from pqcstore import keys
+    from pqcstore.storage.encrypted_store import EncryptedObjectStore
+    from pqcstore.storage.minio_store import MinioStore
+
+    settings = Settings.from_env()
+    public_key, _ = keys.load_public_key(Path(args.recipient_public_key))
+    store = MinioStore(settings)
+    store.ensure_bucket(args.bucket)
+    path = Path(args.input)
+    with path.open("rb") as reader:
+        result = EncryptedObjectStore(store).put(args.bucket, args.key, reader,
+                                                 path.stat().st_size, public_key, args.chunk_size)
+    _print_result("PUT", result)
+    return 0
+
+
+def cmd_get(args: argparse.Namespace) -> int:
+    from pqcstore import keys
+    from pqcstore.crypto.chunked_aead import IntegrityError
+    from pqcstore.storage.encrypted_store import EncryptedObjectStore
+    from pqcstore.storage.minio_store import MinioStore
+
+    settings = Settings.from_env()
+    private_key, kid = keys.load_private_key(Path(args.recipient_private_key))
+    output = Path(args.output)
+    # Plaintext goes to a temporary file and is published only after every chunk verified.
+    partial = output.with_name(output.name + ".partial")
+    try:
+        with partial.open("wb") as sink:
+            result = EncryptedObjectStore(MinioStore(settings)).get(
+                args.bucket, args.key, private_key, sink, args.version, expected_key_id=kid)
+    except IntegrityError as exc:
+        partial.unlink(missing_ok=True)
+        print(f"REJECTED: {exc}", file=sys.stderr)
+        return 2
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    partial.replace(output)
+    _print_result("GET", result)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="pqcstore")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -73,6 +137,27 @@ def main(argv: list[str] | None = None) -> int:
     smoke = sub.add_parser("s3-smoke", help="raw S3 round trip without encryption")
     smoke.add_argument("--size", type=int, default=1024 * 1024, help="payload bytes (default 1 MiB)")
     smoke.set_defaults(func=cmd_s3_smoke)
+
+    keygen = sub.add_parser("keygen", help="create a recipient ML-KEM-768 key pair")
+    keygen.add_argument("--public", required=True)
+    keygen.add_argument("--private", required=True)
+    keygen.set_defaults(func=cmd_keygen)
+
+    put = sub.add_parser("put", help="encrypt a file and upload it as a new version")
+    put.add_argument("--bucket", required=True)
+    put.add_argument("--key", required=True)
+    put.add_argument("--input", required=True)
+    put.add_argument("--recipient-public-key", required=True)
+    put.add_argument("--chunk-size", type=int, default=4 * 1024 * 1024)
+    put.set_defaults(func=cmd_put)
+
+    get = sub.add_parser("get", help="download, verify and decrypt an object")
+    get.add_argument("--bucket", required=True)
+    get.add_argument("--key", required=True)
+    get.add_argument("--output", required=True)
+    get.add_argument("--recipient-private-key", required=True)
+    get.add_argument("--version", help="default: latest committed version")
+    get.set_defaults(func=cmd_get)
     args = parser.parse_args(argv)
     return args.func(args)
 

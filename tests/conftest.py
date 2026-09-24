@@ -3,8 +3,25 @@ import uuid
 
 import pytest
 
+from pqcstore.crypto import mlkem
+from pqcstore.crypto.manifest import ObjectIdentity, new_version
 from pqcstore.settings import Settings
 from pqcstore.storage.minio_store import MinioStore
+
+
+@pytest.fixture(scope="session")
+def recipient() -> mlkem.KEMKeyPair:
+    return mlkem.generate_keypair()
+
+
+@pytest.fixture(scope="session")
+def other_recipient() -> mlkem.KEMKeyPair:
+    return mlkem.generate_keypair()
+
+
+@pytest.fixture
+def identity() -> ObjectIdentity:
+    return ObjectIdentity("research", "pqc-bench", "dataset/item-001", new_version())
 
 
 @pytest.fixture(scope="session")
