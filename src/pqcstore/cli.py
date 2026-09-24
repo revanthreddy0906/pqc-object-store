@@ -87,11 +87,13 @@ def cmd_keygen(args: argparse.Namespace) -> int:
 
 def cmd_put(args: argparse.Namespace) -> int:
     from pqcstore import keys
+    from pqcstore.crypto import envelope
     from pqcstore.storage.encrypted_store import EncryptedObjectStore
     from pqcstore.storage.minio_store import MinioStore
 
     settings = Settings.from_env()
     public_key, _ = keys.load_public_key(Path(args.recipient_public_key))
+    envelope.warm_up()
     store = MinioStore(settings)
     store.ensure_bucket(args.bucket)
     path = Path(args.input)
@@ -104,12 +106,14 @@ def cmd_put(args: argparse.Namespace) -> int:
 
 def cmd_get(args: argparse.Namespace) -> int:
     from pqcstore import keys
+    from pqcstore.crypto import envelope
     from pqcstore.crypto.chunked_aead import IntegrityError
     from pqcstore.storage.encrypted_store import EncryptedObjectStore
     from pqcstore.storage.minio_store import MinioStore
 
     settings = Settings.from_env()
     private_key, kid = keys.load_private_key(Path(args.recipient_private_key))
+    envelope.warm_up()
     output = Path(args.output)
     # Plaintext goes to a temporary file and is published only after every chunk verified.
     partial = output.with_name(output.name + ".partial")

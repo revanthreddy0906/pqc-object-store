@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.0 · 24 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.1 · 24 Sep 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.0"],
+   ["Document", "Project Source of Truth (SoT), version 1.1 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -279,6 +279,19 @@ B(["Any change to a decision (D-numbers), the manifest schema, timer definitions
    "after that point invalidates previously collected final data.",
    "Numbers in the paper come only from versioned analysis scripts run on retained raw files — never typed "
    "in by hand and never taken from pilot runs."])
+H2("Change log")
+T([["Version", "Date", "Change", "Status"],
+   ["1.0", "24 Sep 2026", "Initial baseline.", "Approved (Revanth)"],
+   ["1.1", "24 Sep 2026", "Aligned with the Phase 2 implementation: (1) object versions are UUIDv7 instead of "
+                          "UUIDv4, so the latest committed version can be found by listing (§7.2); "
+                          "(2) the manifest nests the authenticated context as a \"context\" object next to "
+                          "ke_ct, salt and nonce_prefix (§7.3); (3) liboqs is built with OQS_MINIMAL_BUILD "
+                          "limited to ML-KEM-512/768/1024 and capped build parallelism (D12); (4) the one-shot "
+                          "v1 format was never built: milestone M1 already uses the chunked format (D7, A4); "
+                          "(5) implementations must warm up each process before timed operations; the first "
+                          "liboqs call costs ~70 ms of library loading (§8.2).",
+    "Pending team review (§1.3)"]],
+  [16, 22, 104, 28])
 
 # ================================================================ 2
 H1("Project summary")
@@ -468,7 +481,7 @@ T([["ID", "Decision", "Rationale", "Source"],
           "TLS is held constant across modes.",
     "Isolates application-layer PQC; TLS is a confounder.", "Draft paper §6.1"],
    ["D7", "All benchmark runs use the <b>chunked v2 format</b> for every size (small objects = one chunk). "
-          "The one-shot v1 format exists only for the first milestone.",
+          "(v1.1: the one-shot v1 format was never built; milestone M1 also uses chunked v2.)",
     "No discontinuity at a size threshold; bounded memory at 500 MiB.", "Amends spec §10.3/§11"],
    ["D8", "Replace the full cross-product with three sweeps: concurrency sweep, size sweep and corner "
           "points (§9.2).",
@@ -483,7 +496,8 @@ T([["ID", "Decision", "Rationale", "Source"],
    ["D11", "Manifest binary fields encoded as base64url, not hex.",
     "Hex doubles the KEM-ciphertext footprint (2,176 chars vs 1,452) and distorts metadata metrics.",
     "Amends spec §10.3"],
-   ["D12", "Pins: Python 3.12.x, liboqs 0.16.0 (own build, shared lib, CPU-dispatch flags recorded), "
+   ["D12", "Pins: Python 3.12.x, liboqs 0.16.0 (own build, shared lib, OQS_DIST_BUILD, "
+           "OQS_USE_OPENSSL=OFF, OQS_MINIMAL_BUILD = ML-KEM-512/768/1024; flags and commit recorded), "
            "liboqs-python 0.16.0.1, cryptography 50.0.1, minio 7.2.20. Ubuntu 24.04 LTS on final VMs.",
     "Reproducibility; no dependency changes during final runs.", "Refines spec §8"],
    ["D13", "Developer laptops (macOS/Windows) are for development only. <b>No reported number</b> may come "
@@ -540,7 +554,7 @@ H2("Amendments to the implementation specification")
 B(["<b>A1</b> Add mode R1 (RSA-4096 OAEP) to §13 and to all matrices.",
    "<b>A2</b> Replace the §15.2 final matrix with §9.2 of this document (up to 500 workers and 500 MiB).",
    "<b>A3</b> Base64url instead of hex in manifests (D11).",
-   "<b>A4</b> The benchmark always uses the chunked v2 format (D7); one-shot v1 exists only for the milestone.",
+   "<b>A4</b> The benchmark always uses the chunked v2 format (D7); one-shot v1 was dropped entirely (v1.1).",
    "<b>A5</b> Manifest-as-commit replaces the separate commit marker (D9). B0/B1 also write a manifest.",
    "<b>A6</b> Add a server-side resource sampler (§8.3) and a server-samples schema.",
    "<b>A7</b> Custom multi-process runner (D10); Locust is optional.",
@@ -563,13 +577,13 @@ B(["<b>Recipient</b> owns (ek, dk) ← ML-KEM-768.KeyGen(). ek is distributed; d
    "Baseline keys: RSA-4096 key pair (R1), X25519 static key pair (B2), 32-byte AES master key (B1). All "
    "are generated once per experiment by <font name='Mono'>pqcstore keygen</font>, outside timed runs."])
 H2("Object identity and authenticated context")
-P("Identity I = (tenant, bucket, object_key, object_version), where object_version is a fresh UUIDv4 per "
-  "PUT. The context is canonical JSON (UTF-8, sorted keys, separators \",\" and \":\", no whitespace). "
+P("Identity I = (tenant, bucket, object_key, object_version), where object_version is a fresh UUIDv7 (RFC 9562, time-ordered) per "
+  "PUT, so the latest committed version is the largest one when listed. The context is canonical JSON (UTF-8, sorted keys, separators \",\" and \":\", no whitespace). "
   "Every field that controls derivation or interpretation is in the context and is therefore authenticated.")
 code("""
 {"aead":"AES-256-GCM","bucket":"pqc-bench","chunk_count":4,"chunk_size":4194304,
  "format":"pqcs-chunked","kdf":"HKDF-SHA256","ke_ct_sha256":"<b64url>","mode":"P1",
- "ke":"ML-KEM-768","object_key":"dataset/item-001","object_version":"<uuid4>",
+ "ke":"ML-KEM-768","object_key":"dataset/item-001","object_version":"<uuid7>",
  "plaintext_size":16777216,"recipient_key_id":"<b64url sha256(ek)>","schema_version":2,
  "tenant":"research"}
 """)
@@ -586,8 +600,8 @@ for j in 0..n-1:                                               # T_AEAD (summed)
     AAD_j    = ctx || uint64_be(j) || uint32_be(len_j) || uint8(is_final_j)
     (c_j,t_j)= AES-256-GCM.Enc(K_obj, nonce_j, P_j, AAD_j)
     stream  += c_j || t_j                                      # streamed to S3 (T_S3)
-manifest     = ctx + {ke_ct: b64(C_kem), salt: b64(salt),
-                      nonce_prefix: b64(prefix)}                 # T_SER
+manifest     = {context: ctx, ke_ct: b64(C_kem), salt: b64(salt),
+                nonce_prefix: b64(prefix)}                       # T_SER
 PUT data.enc (multipart stream) ; then PUT manifest.json (= commit)
 """)
 H2("GET — per object (mode P1)")
@@ -673,7 +687,10 @@ B(["time.perf_counter_ns() for wall stages; time.thread_time_ns() for per-reques
    "− all other measured stages. T_other must be < 2% of total in validation (Phase 5 exit test).",
    "Payloads come from a pre-generated 64 MiB random pool (memoryview slices, cycled for larger objects), "
    "so no disk reads and no payload generation happen inside timers.",
-   "No per-request printing during runs. Records are buffered and flushed per worker at run end."])
+   "No per-request printing during runs. Records are buffered and flushed per worker at run end.",
+   "Every process calls envelope.warm_up() before its first timed operation: the first liboqs call pays "
+   "~70 ms of library loading and the first HKDF call ~3 ms of setup, which would otherwise be booked as "
+   "key-establishment and KDF time."])
 H2("Record schemas")
 H3("requests.jsonl — one line per request")
 code("""
@@ -1028,7 +1045,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.0",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.1",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

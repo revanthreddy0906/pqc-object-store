@@ -74,6 +74,8 @@ class EncryptedObjectStore:
 
     def put(self, bucket: str, object_key: str, reader: BinaryIO, plaintext_size: int,
             recipient_public_key: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> TransferResult:
+        """Encrypt and upload a new version. Time spent in `reader.read` is counted in
+        s3_ns, so timed runs read from the in-memory payload pool."""
         start = time.perf_counter_ns()
         identity = ObjectIdentity(self.tenant, bucket, object_key, new_version())
         result = TransferResult(identity)
@@ -108,10 +110,15 @@ class EncryptedObjectStore:
     def get(self, bucket: str, object_key: str, recipient_private_key: bytes, sink: BinaryIO,
             version: str | None = None, expected_key_id: str | None = None) -> TransferResult:
         """Decrypt into `sink`. Data written to `sink` is only trustworthy if this returns;
-        on IntegrityError the caller must discard it."""
+        on IntegrityError the caller must discard it. Benchmarks should pass `version`;
+        otherwise the LIST that finds the latest version is counted as S3 time.
+
+        Time spent in `sink.write` is counted in s3_ns, so timed runs use a null sink."""
         start = time.perf_counter_ns()
+        list_ns = 0
         if version is None:
             versions = self.committed_versions(bucket, object_key)
+            list_ns = time.perf_counter_ns() - start
             if not versions:
                 raise ObjectNotFound(f"no committed version of {bucket}/{object_key}")
             version = versions[-1]
@@ -145,8 +152,8 @@ class EncryptedObjectStore:
             sink.write(chunk)
             result.plaintext_bytes += len(chunk)
         stages.aead_ns = decryptor.aead_ns
-        stages.s3_ns = manifest_fetch_ns + (time.perf_counter_ns() - download_start
-                                            - decryptor.aead_ns)
+        stages.s3_ns = list_ns + manifest_fetch_ns + (time.perf_counter_ns() - download_start
+                                                      - decryptor.aead_ns)
         stages.total_ns = time.perf_counter_ns() - start
         result.stored_bytes = stored
         result.metadata_bytes = len(manifest_bytes)

@@ -30,6 +30,17 @@ from pqcstore.timing import Stages, measure
 MODE = "P1"
 
 
+def warm_up() -> None:
+    """Pay one-off costs (liboqs load and self-checks, first HKDF/AES-GCM setup) outside
+    any timer. Call once per process before timed operations."""
+    pair = mlkem.generate_keypair()
+    ke_ct, secret = mlkem.encapsulate(pair.public_key)
+    mlkem.decapsulate(pair.private_key, ke_ct)
+    key = derive_object_key(secret, os.urandom(SALT_BYTES), b"warm-up")
+    list(ChunkDecryptor(key, bytes(NONCE_PREFIX_BYTES), b"", 1, 16).plaintext(
+        ChunkEncryptor(key, bytes(NONCE_PREFIX_BYTES), b"", 1, 16).records(io.BytesIO(b"x"))))
+
+
 def seal(recipient_public_key: bytes, identity: ObjectIdentity, plaintext_size: int,
          stages: Stages, chunk_size: int = DEFAULT_CHUNK_SIZE) -> tuple[bytes, ChunkEncryptor]:
     """Return (manifest_bytes, encryptor) for one new object version."""
