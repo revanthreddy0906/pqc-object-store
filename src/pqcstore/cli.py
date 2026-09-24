@@ -233,11 +233,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
           f"failures={dict(report.failures)} worst_run_p99_T_other={report.max_other_fraction:.3%} "
           f"outlier_requests={report.outlier_requests} "
           f"timer_violations={report.timer_violation_count} "
-          f"schema_errors={report.schema_error_count}")
+          f"schema_errors={report.schema_error_count} "
+          f"n1_sessions_checked={report.sessions_checked}")
     for label, problems in (("checksum", report.checksum_errors),
                             ("invalid run", report.invalid_runs),
                             ("schema", report.schema_errors),
-                            ("timer", report.timer_violations)):
+                            ("timer", report.timer_violations),
+                            ("session bound", report.session_violations)):
         for problem in problems[:10]:
             print(f"  {label}: {problem}")
     print("VALID" if report.ok else "INVALID")

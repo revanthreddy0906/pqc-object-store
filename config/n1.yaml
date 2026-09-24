@@ -1,0 +1,32 @@
+# Sweep E (SoT §9.2): bounded ML-KEM session amortization vs per-object ML-KEM (P1)
+# and the symmetric floor (B1). Run on the Linux VMs; T_max = 60 s.
+experiment_id: sweep-e-n1
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 10
+duration_s: 30
+get_objects: 64
+pool_bytes: 67108864
+seed: 20260924
+server_metrics_url: http://127.0.0.1:9000/minio/v2/metrics/node
+blocks:
+  - sizes: [1024, 65536, 1048576]
+    concurrency: [1, 32, 128]
+    operations: [put, get]
+    modes: [B1, P1, N1]
+    session_bmax: [1, 10, 100, 1000]
+    session_tmax_s: 60
+    queue_aware: [false]
+  # Queue-aware bound at equal offered load (open loop), SoT §16.3.
+  - loop: open
+    sizes: [1024, 65536]
+    rates: [200, 800, 1600]
+    threads: 128
+    operations: [put]
+    modes: [P1, N1]
+    session_bmax: [100]
+    session_bmin: 1
+    session_tmax_s: 60
+    queue_aware: [false, true]

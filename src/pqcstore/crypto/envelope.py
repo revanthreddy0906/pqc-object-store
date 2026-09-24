@@ -17,7 +17,7 @@ from pqcstore.crypto.chunked_aead import (
     ChunkEncryptor,
     PlainChunker,
 )
-from pqcstore.crypto.kdf import canonical_json, derive_object_key
+from pqcstore.crypto.kdf import OBJECT_DOMAIN, canonical_json, derive_object_key
 from pqcstore.crypto.manifest import (
     SALT_BYTES,
     ObjectIdentity,
@@ -26,6 +26,7 @@ from pqcstore.crypto.manifest import (
     parse_manifest,
 )
 from pqcstore.crypto.modes import MODES, RecipientPrivate, RecipientPublic, as_private, as_public
+from pqcstore.crypto.session import SESSION_DOMAIN, ReceiverSessionCache, SenderSession
 from pqcstore.timing import Stages, measure
 
 DEFAULT_MODE = "P1"
@@ -45,28 +46,47 @@ def warm_up(mode: str = DEFAULT_MODE, public: RecipientPublic | bytes | None = N
     list(ChunkDecryptor(key, bytes(NONCE_PREFIX_BYTES), b"", 1, 16).plaintext(
         ChunkEncryptor(key, bytes(NONCE_PREFIX_BYTES), b"", 1, 16).records(io.BytesIO(b"x"))))
     if public is not None and private is not None:
+        from pqcstore.crypto.session import SessionPolicy
+
         identity = ObjectIdentity("warm-up", "warm-up", "warm-up", "warm-up")
-        manifest, ciphertext = encrypt_bytes(public, identity, b"x" * 64, 16, mode)
+        session = SenderSession(as_public(public).mlkem, SessionPolicy(2, 60)) \
+            if mode == "N1" else None
+        manifest, ciphertext = encrypt_bytes(public, identity, b"x" * 64, 16, mode, session)
         decrypt_bytes(private, manifest, ciphertext, identity, mode=mode)
 
 
 def seal(recipient: RecipientPublic | bytes, identity: ObjectIdentity, plaintext_size: int,
-         stages: Stages, chunk_size: int = DEFAULT_CHUNK_SIZE,
-         mode: str = DEFAULT_MODE) -> tuple[bytes, ChunkEncryptor | PlainChunker]:
-    """Return (manifest_bytes, encryptor) for one new object version."""
+         stages: Stages, chunk_size: int = DEFAULT_CHUNK_SIZE, mode: str = DEFAULT_MODE,
+         session: SenderSession | None = None,
+         details: dict | None = None) -> tuple[bytes, ChunkEncryptor | PlainChunker]:
+    """Return (manifest_bytes, encryptor) for one new object version. Mode N1 takes its
+    root from `session`; if `details` is given, session facts are written into it."""
     spec = MODES[mode]
     public = as_public(recipient)
+    extra, domain = None, OBJECT_DOMAIN
     with measure(stages, "ke_ns"):
-        ke_ct, ikm = spec.establish(public)
+        if mode == "N1":
+            if session is None:
+                raise ValueError("mode N1 needs a SenderSession")
+            grant = session.grant()
+            ke_ct, ikm = grant.ke_ct, grant.root
+            extra = {"session_id": grant.session_id, "session_seq": grant.seq,
+                     "session_bound": grant.bound}
+            domain = SESSION_DOMAIN
+            if details is not None:
+                details.update(extra, session_rotated=grant.rotated,
+                               session_age_s=grant.age_s)
+        else:
+            ke_ct, ikm = spec.establish(public)
     with measure(stages, "ser_ns"):
         salt = os.urandom(SALT_BYTES)
         prefix = os.urandom(NONCE_PREFIX_BYTES)
         context = build_context(identity, mode, plaintext_size, chunk_size,
-                                spec.key_id(public), ke_ct)
+                                spec.key_id(public), ke_ct, extra)
         context_bytes = canonical_json(context)
     if spec.encrypts:
         with measure(stages, "kdf_ns"):  # key derivation and the AES key schedule
-            object_key = derive_object_key(ikm, salt, context_bytes)
+            object_key = derive_object_key(ikm, salt, context_bytes, domain)
             encryptor = ChunkEncryptor(object_key, prefix, context_bytes, plaintext_size,
                                        chunk_size)
     else:
@@ -78,33 +98,47 @@ def seal(recipient: RecipientPublic | bytes, identity: ObjectIdentity, plaintext
 
 def open_manifest(recipient: RecipientPrivate | bytes, manifest_bytes: bytes,
                   identity: ObjectIdentity, stages: Stages, expected_key_id: str | None = None,
-                  mode: str = DEFAULT_MODE) -> ChunkDecryptor | PlainChunker:
-    """Validate the manifest (for the mode the caller expects) and return a decryptor."""
+                  mode: str = DEFAULT_MODE,
+                  session_cache: ReceiverSessionCache | None = None) -> ChunkDecryptor | PlainChunker:
+    """Validate the manifest (for the mode the caller expects) and return a decryptor.
+    For N1, `session_cache` lets objects of one session share a single decapsulation."""
     spec = MODES[mode]
     with measure(stages, "ser_ns"):
         manifest = parse_manifest(manifest_bytes, identity, mode, expected_key_id)
     if not spec.encrypts:
         return PlainChunker(manifest.plaintext_size, manifest.chunk_size)
+    private = as_private(recipient)
+    domain = OBJECT_DOMAIN
     with measure(stages, "ke_ns"):
-        ikm = spec.recover(as_private(recipient), manifest.ke_ct)
+        if mode == "N1":
+            domain = SESSION_DOMAIN
+            ctx = manifest.context
+            if session_cache is not None:
+                ikm = session_cache.root(private.mlkem, ctx["session_id"], ctx["session_seq"],
+                                         ctx["session_bound"], manifest.ke_ct)
+            else:
+                ikm = spec.recover(private, manifest.ke_ct)
+        else:
+            ikm = spec.recover(private, manifest.ke_ct)
     with measure(stages, "kdf_ns"):  # key derivation and the AES key schedule
-        object_key = derive_object_key(ikm, manifest.salt, manifest.context_bytes)
+        object_key = derive_object_key(ikm, manifest.salt, manifest.context_bytes, domain)
         return ChunkDecryptor(object_key, manifest.nonce_prefix, manifest.context_bytes,
                               manifest.plaintext_size, manifest.chunk_size)
 
 
 def encrypt_bytes(recipient: RecipientPublic | bytes, identity: ObjectIdentity, plaintext: bytes,
-                  chunk_size: int = DEFAULT_CHUNK_SIZE,
-                  mode: str = DEFAULT_MODE) -> tuple[bytes, bytes]:
+                  chunk_size: int = DEFAULT_CHUNK_SIZE, mode: str = DEFAULT_MODE,
+                  session: SenderSession | None = None) -> tuple[bytes, bytes]:
     """In-memory convenience for tests: return (manifest_bytes, ciphertext)."""
     manifest_bytes, encryptor = seal(recipient, identity, len(plaintext), Stages(), chunk_size,
-                                     mode)
+                                     mode, session)
     return manifest_bytes, b"".join(encryptor.records(io.BytesIO(plaintext)))
 
 
 def decrypt_bytes(recipient: RecipientPrivate | bytes, manifest_bytes: bytes, ciphertext: bytes,
                   identity: ObjectIdentity, expected_key_id: str | None = None,
-                  mode: str = DEFAULT_MODE) -> bytes:
+                  mode: str = DEFAULT_MODE,
+                  session_cache: ReceiverSessionCache | None = None) -> bytes:
     decryptor = open_manifest(recipient, manifest_bytes, identity, Stages(), expected_key_id,
-                              mode)
+                              mode, session_cache)
     return b"".join(decryptor.plaintext([ciphertext]))

@@ -1,0 +1,16 @@
+# Quick N1 sanity check on a development machine; never reported (SoT D13).
+experiment_id: n1-dev
+bucket: pqc-bench
+repetitions: 1
+warmup_s: 1
+duration_s: 3
+get_objects: 20
+pool_bytes: 16777216
+seed: 7
+blocks:
+  - sizes: [1024]
+    concurrency: [1, 8]
+    operations: [put, get]
+    modes: [P1, N1]
+    session_bmax: [1, 10, 100]
+    session_tmax_s: 60

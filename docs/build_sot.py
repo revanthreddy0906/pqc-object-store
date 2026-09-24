@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.3 · 24 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.4 · 24 Sep 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.3 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.4 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -305,6 +305,17 @@ T([["Version", "Date", "Change", "Status"],
                           "CPU/RSS/network are scraped from MinIO's own /minio/v2/metrics/node "
                           "endpoint, no agent needed (§10); (6) readers must name the expected mode, "
                           "so a planted B0 object cannot downgrade P1 (§7.6).",
+    "Pending team review (§1.3)"],
+   ["1.4", "24 Sep 2026", "Phase 7 (N1): (1) N1 context adds authenticated session_id, session_seq "
+                          "and session_bound; HKDF domain 'pqc-s3-session-v1'; the bound is fixed "
+                          "per session at creation, so B_max and T_max are hard caps (§16); "
+                          "(2) queue-aware utilization = in-flight requests / worker threads of "
+                          "the process, EWMA-smoothed on every grant; (3) receivers cache "
+                          "decapsulated roots under their own B_max and T_max and reject objects "
+                          "beyond their B_max; (4) prior-art search found S3 Bucket Keys and the "
+                          "AWS Encryption SDK cache: bounded reuse itself is not claimed as new; "
+                          "the queue-aware policy and the Sweep E trade-off evaluation are "
+                          "(docs/n1-prior-art.md, §4.5); (5) config/n1.yaml implements Sweep E.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -446,6 +457,11 @@ box("What this implies for the hypotheses", [
 
 H2("Prior art that bounds our novelty claims")
 T([["Work", "What it does", "Consequence for us"],
+   ["Amazon S3 Bucket Keys",
+    "A time-limited bucket-level key from KMS derives unique per-object data keys; up to 99% "
+    "fewer KMS requests.",
+    "The closest deployed analogue of N1 (added in v1.4). Bounded reuse with per-object derivation "
+    "is established practice; see docs/n1-prior-art.md for the resulting claim wording."],
    ["AWS Encryption SDK — data key caching (caching CMM)",
     "Reuses a data key across messages, bounded by max_age, max_messages_encrypted and max_bytes_encrypted.",
     "Bounded key reuse with count/age limits is <b>not new</b>. C3 must cite it and claim only (a) applying "
@@ -1063,7 +1079,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.3",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.4",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

@@ -42,6 +42,10 @@ CONTEXT_FIELDS = frozenset({
     "ke_ct_sha256",
 })
 MANIFEST_FIELDS = frozenset({"context", "ke_ct", "salt", "nonce_prefix"})
+# Extra authenticated context fields per mode.
+MODE_FIELDS: dict[str, frozenset[str]] = {
+    "N1": frozenset({"session_id", "session_seq", "session_bound"}),
+}
 
 
 @dataclass(frozen=True)
@@ -97,9 +101,13 @@ def new_version() -> str:
 
 
 def build_context(identity: ObjectIdentity, mode: str, plaintext_size: int, chunk_size: int,
-                  recipient_key_id: str, ke_ct: bytes) -> dict[str, Any]:
+                  recipient_key_id: str, ke_ct: bytes,
+                  extra: dict[str, Any] | None = None) -> dict[str, Any]:
     spec = MODES[mode]
+    if set(extra or {}) != MODE_FIELDS.get(mode, frozenset()):
+        raise ValueError(f"mode {mode} needs context fields {sorted(MODE_FIELDS.get(mode, []))}")
     return {
+        **(extra or {}),
         "schema_version": SCHEMA_VERSION,
         "format": FORMAT,
         "tenant": identity.tenant,
@@ -141,11 +149,13 @@ def parse_manifest(data: bytes, expected: ObjectIdentity, expected_mode: str,
     if not isinstance(manifest, dict) or set(manifest) != MANIFEST_FIELDS:
         raise IntegrityError("manifest has missing or unexpected fields")
     context = manifest["context"]
-    if not isinstance(context, dict) or set(context) != CONTEXT_FIELDS:
+    expected_fields = CONTEXT_FIELDS | MODE_FIELDS.get(expected_mode, frozenset())
+    if not isinstance(context, dict) or context.get("mode") != expected_mode:
+        mode = context.get("mode") if isinstance(context, dict) else None
+        raise IntegrityError(f"object uses mode {mode!r}, expected {expected_mode!r}")
+    if set(context) != expected_fields:
         raise IntegrityError("manifest context has missing or unexpected fields")
 
-    if context["mode"] != expected_mode:
-        raise IntegrityError(f"object uses mode {context['mode']!r}, expected {expected_mode!r}")
     spec = MODES[expected_mode]
     fixed = {"schema_version": SCHEMA_VERSION, "format": FORMAT, "ke": spec.ke, "kdf": spec.kdf,
              "aead": spec.aead}
@@ -159,6 +169,13 @@ def parse_manifest(data: bytes, expected: ObjectIdentity, expected_mode: str,
         raise IntegrityError("manifest belongs to a different object or version")
     if expected_key_id is not None and context["recipient_key_id"] != expected_key_id:
         raise IntegrityError("object was not encrypted for this recipient key")
+
+    if expected_mode == "N1":
+        session_id = context["session_id"]
+        seq = _require_int(context, "session_seq")
+        bound = _require_int(context, "session_bound")
+        if not (isinstance(session_id, str) and len(session_id) == 32) or not 0 <= seq < bound:
+            raise IntegrityError("invalid session fields")
 
     size = _require_int(context, "plaintext_size")
     chunk_size = _require_int(context, "chunk_size")

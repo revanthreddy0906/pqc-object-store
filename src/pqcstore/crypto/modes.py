@@ -10,6 +10,7 @@ establishment alone.
     B2  X25519                ephemeral-static ECDH per object
     P1  ML-KEM-768            encapsulation per object
     P2  X25519 + ML-KEM-768   both; IKM = S_kem || S_ecdh
+    N1  ML-KEM-768 session    one encapsulation per bounded session root (session.py)
 
 Keys are carried as bytes so they can be passed to worker processes; parsed
 key objects are cached per process.
@@ -144,6 +145,10 @@ def _hybrid_receive(priv: RecipientPrivate, ke_ct: bytes) -> bytes:
             + _ecdh_receive(_require(priv.x25519, "X25519"), epk))
 
 
+def _needs_session(pub: RecipientPublic) -> tuple[bytes, bytes]:
+    raise ValueError("mode N1 needs a SenderSession (pass session= to seal/put)")
+
+
 @dataclass(frozen=True)
 class Mode:
     name: str
@@ -187,6 +192,12 @@ MODES: dict[str, Mode] = {m.name: m for m in [
          key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM") + _require(pub.x25519, "X25519")),
          establish=_hybrid_send,
          recover=_hybrid_receive),
+    # N1: one ML-KEM-768 root per bounded session (crypto/session.py); the envelope
+    # obtains keys from a SenderSession / ReceiverSessionCache instead.
+    Mode("N1", "ML-KEM-768-session", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,
+         key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM")),
+         establish=_needs_session,
+         recover=lambda priv, ct: mlkem.decapsulate(_require(priv.mlkem, "ML-KEM"), ct)),
 ]}
 
 

@@ -47,12 +47,14 @@ class Report:
     schema_error_count: int = 0
     checksum_errors: list[str] = field(default_factory=list)
     invalid_runs: list[str] = field(default_factory=list)
+    session_violations: list[str] = field(default_factory=list)
+    sessions_checked: int = 0
     max_other_fraction: float = 0.0
 
     @property
     def ok(self) -> bool:
         return not (self.schema_errors or self.timer_violations or self.checksum_errors
-                    or self.invalid_runs) and self.records > 0
+                    or self.invalid_runs or self.session_violations) and self.records > 0
 
 
 def validate(run_dir: Path) -> Report:
@@ -65,6 +67,7 @@ def validate(run_dir: Path) -> Report:
     report.invalid_runs = [run["run_id"] for run in manifest["runs"] if not run["valid"]]
 
     per_run: dict[str, list[tuple[float, int, int]]] = defaultdict(list)
+    sessions: dict[tuple, list[tuple[int, int, int]]] = defaultdict(list)
     with (run_dir / "requests.jsonl").open(encoding="utf-8") as handle:
         for number, line in enumerate(handle, 1):
             record = json.loads(line)
@@ -80,6 +83,9 @@ def validate(run_dir: Path) -> Report:
             if not record["success"]:
                 report.failures[record["error_class"]] += 1
                 continue
+            if record.get("session_id") is not None:
+                sessions[(record["run_id"], record["worker_id"], record["session_id"])].append(
+                    (record["session_seq"], record["session_bound"], record["session_bmax"]))
             report.measured += record["phase"] == "measure"
             total = record["total_ns"]
             other = total - sum(record[s] for s in STAGES)
@@ -93,6 +99,17 @@ def validate(run_dir: Path) -> Report:
             fraction = excess / total if total else 0.0
             report.outlier_requests += fraction > RUN_P99_LIMIT
             per_run[record["run_id"]].append((fraction, excess, total))
+
+    # N1: the hard bounds, checked from the raw records (SoT Phase 7 exit criterion).
+    for key, grants in sessions.items():
+        report.sessions_checked += 1
+        seqs = sorted(seq for seq, _, _ in grants)
+        bounds = {bound for _, bound, _ in grants}
+        b_max = grants[0][2]
+        if len(bounds) != 1 or len(grants) > min(bounds) or min(bounds) > b_max \
+                or len(set(seqs)) != len(seqs) or seqs[-1] >= min(bounds):
+            report.session_violations.append(f"{key}: {len(grants)} objects, bounds {bounds}, "
+                                              f"b_max {b_max}")
 
     for run_id, rows in sorted(per_run.items()):
         fractions = sorted(f for f, _, _ in rows)

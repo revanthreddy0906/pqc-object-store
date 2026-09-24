@@ -21,20 +21,29 @@ def test_tiny_experiment_end_to_end(store, settings, tmp_path):
              "modes": ["B0", "R1", "P1"]},
             {"loop": "open", "sizes": [1024], "rates": [40], "threads": 4,
              "operations": ["put"], "modes": ["P2"]},
+            {"sizes": [1024], "concurrency": [4], "operations": ["put", "get"],
+             "modes": ["N1"], "session_bmax": [1, 5], "queue_aware": [False, True],
+             "session_tmax_s": 30},
         ],
     }))
     run_dir, outcomes = run_experiment(config, tmp_path / "out", progress=lambda _: None)
 
-    assert len(outcomes) == 7 and all(o.valid for o in outcomes)
+    assert len(outcomes) == 7 + 8 and all(o.valid for o in outcomes)
     report = validate(run_dir)
     assert report.records > 0 and report.schema_error_count == 0
     assert not report.checksum_errors and not report.invalid_runs
     assert not report.failures
     assert not any("exceed" in v for v in report.timer_violations)  # no double counting
+    assert report.sessions_checked > 0 and not report.session_violations
 
     records = [json.loads(line) for line in (run_dir / "requests.jsonl").open()]
-    closed = [r for r in records if r["loop_type"] == "closed"]
+    closed = [r for r in records if r["loop_type"] == "closed" and r["mode"] != "N1"]
     assert {r["mode"] for r in closed} == {"B0", "R1", "P1"}
+    n1_puts = [r for r in records if r["mode"] == "N1" and r["operation"] == "put"
+               and r["success"]]
+    assert {r["session_bmax"] for r in n1_puts} == {1, 5}
+    assert all(r["session_seq"] == 0 for r in n1_puts if r["session_bmax"] == 1)
+    assert any(r["session_seq"] > 0 for r in n1_puts if r["session_bmax"] == 5)
     assert {r["concurrency"] for r in closed} == {3}
     assert {r["phase"] for r in closed} == {"warmup", "measure"}
     opened = [r for r in records if r["loop_type"] == "open"]

@@ -22,7 +22,8 @@ timers or the experiment matrix.
 | 4 | Streaming: 500 MiB round trips, memory flat in object size (~50 MiB per transfer) | done |
 | 5 | Modes B0/B1/R1/B2/P1/P2 on one data path; multi-process benchmark runner (closed/open loop); client + server samplers; record validator | done |
 | 6 | Pilot matrix on two Linux VMs (`config/pilot.yaml`) | next — needs VMs |
-| 7–8 | Candidate algorithm (N1), final runs | planned |
+| 7 | N1 bounded ML-KEM session amortization (fixed and queue-aware), Sweep E config, prior-art note | done |
+| 8 | Final measurements on the VMs | planned |
 
 ## Milestone M1: encrypted round trip
 
@@ -75,14 +76,14 @@ Because encryption is client-side, any S3-compatible store (for example Garage) 
 
 ```
 docker/            MinIO source-build Dockerfile
-docs/              Source of Truth PDF and its generator
+docs/              Source of Truth PDF and generator; N1 prior-art note
 scripts/           liboqs build script
 src/pqcstore/
   crypto/          ML-KEM adapter, HKDF, chunked AES-GCM, manifest, envelope (P1)
   storage/         MinIO adapter, encrypted store with manifest-as-commit
   benchmark/       runner, samplers, validator, payload pool, memory probe
   cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, bench, validate, gc
-config/            experiment configurations (development, pilot)
+config/            experiment configurations (development, pilot, n1 = Sweep E)
 tests/             crypto, tamper, binding, hygiene and MinIO integration tests
 experiments/       raw experiment output (git-ignored)
 ```

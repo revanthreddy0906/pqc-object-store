@@ -16,6 +16,7 @@ request not started by the end of the drain window is recorded as failed
 
 from __future__ import annotations
 
+import dataclasses
 import gc
 import hashlib
 import itertools
@@ -52,10 +53,23 @@ class Cell:
     loop: str = "closed"      # "closed" or "open"
     rate: float = 0.0         # open loop: total offered requests per second
     get_fraction: float = 0.7  # mix: share of GETs
+    session_bmax: int = 0      # N1 only: hard object bound per session root
+    session_tmax_s: float = 0.0  # N1 only: hard lifetime of a session root
+    queue_aware: bool = False  # N1 only: adapt the bound to utilization within [bmin, bmax]
+    session_bmin: int = 1
 
     def label(self) -> str:
         load = f"c{self.concurrency}" if self.loop == "closed" else f"r{self.rate:g}"
-        return f"{self.mode}-{self.operation}-{self.size}-{load}"
+        mode = self.mode
+        if mode == "N1":
+            mode += f"{'q' if self.queue_aware else 'b'}{self.session_bmax}"
+        return f"{mode}-{self.operation}-{self.size}-{load}"
+
+    def session_policy(self):
+        from pqcstore.crypto.session import SessionPolicy
+
+        return SessionPolicy(self.session_bmax, self.session_tmax_s, self.queue_aware,
+                             min(self.session_bmin, self.session_bmax))
 
 
 @dataclass(frozen=True)
@@ -114,6 +128,15 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
                                    minio_store.benchmark_http_client(threads + 2))
     estore = EncryptedObjectStore(store, part_size=plan.part_size)
     envelope.warm_up(cell.mode, public, private)
+    busy = [0]  # in-flight requests in this process: the queue-aware policy's utilization
+    busy_lock = threading.Lock()
+    session = cache = None
+    if cell.mode == "N1":
+        from pqcstore.crypto.session import ReceiverSessionCache, SenderSession
+
+        session = SenderSession(public.mlkem, cell.session_policy(),
+                                utilization=lambda: busy[0] / max(1, threads))
+        cache = ReceiverSessionCache(cell.session_policy())
     pool = PayloadPool(plan.pool_bytes)
     # Garbage-collection pauses would land inside random stage timers; collect now and
     # keep the collector off for the timed window (records hold no reference cycles).
@@ -137,7 +160,10 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
         "pid": os.getpid(), "mode": cell.mode, "object_size_bytes": cell.size,
         "concurrency": cell.concurrency, "loop_type": cell.loop, "target_rate": cell.rate,
         "chunk_size": plan.chunk_size,
+        "session_bmax": cell.session_bmax or None, "session_queue_aware": cell.queue_aware,
     }
+    no_session = {"session_id": None, "session_seq": None, "session_bound": None,
+                  "session_rotated": None}
 
     def one(rng: random.Random, thread_id: int, seq: int, operation: str,
             scheduled_ns: int | None) -> dict:
@@ -147,14 +173,22 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
         record["ts_start_utc_ns"] = start_ns
         record["queue_wait_ns"] = 0 if scheduled_ns is None else max(0, start_ns - scheduled_ns)
         record["phase"] = "warmup" if start_ns / 1e9 < warmup_end else "measure"
+        record.update(no_session)
         cpu_start = time.thread_time_ns()
         wall_start = time.perf_counter_ns()
+        with busy_lock:
+            busy[0] += 1
         try:
             if operation == "put":
                 key = f"{plan.put_prefix}w{worker_id}-t{thread_id}-{seq}"
                 result = estore.put(plan.bucket, key, pool.reader(cell.size,
                                                                   rng.randrange(len(pool))),
-                                    cell.size, public, plan.chunk_size, cell.mode)
+                                    cell.size, public, plan.chunk_size, cell.mode, session)
+                if result.details:
+                    record.update(session_id=result.details["session_id"],
+                                  session_seq=result.details["session_seq"],
+                                  session_bound=result.details["session_bound"],
+                                  session_rotated=result.details["session_rotated"])
                 with lock:
                     written.append((key, result.identity.object_version))
                 record["bytes_sent"] = result.stored_bytes + result.metadata_bytes
@@ -162,7 +196,8 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
             else:
                 key, version = rng.choice(plan.get_objects)
                 sink = HashingSink()
-                result = estore.get(plan.bucket, key, private, sink, version, mode=cell.mode)
+                result = estore.get(plan.bucket, key, private, sink, version, mode=cell.mode,
+                                    session_cache=cache)
                 if sink.bytes_written != cell.size:
                     raise IntegrityError("short read")
                 record["bytes_sent"] = 0
@@ -176,6 +211,8 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
             record["total_ns"] = time.perf_counter_ns() - wall_start
             record.update(bytes_sent=0, bytes_received=0, metadata_bytes=0, success=False,
                           error_class=type(exc).__name__)
+        with busy_lock:
+            busy[0] -= 1
         record["cpu_thread_ns"] = time.thread_time_ns() - cpu_start
         return record
 
@@ -214,7 +251,7 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
                                   else "warmup", **dict.fromkeys(STAGE_FIELDS, 0),
                                   "bytes_sent": 0, "bytes_received": 0, "metadata_bytes": 0,
                                   "cpu_thread_ns": 0, "success": False,
-                                  "error_class": "NotStarted"})
+                                  "error_class": "NotStarted", **no_session})
                     continue
                 local.append(one(rng, thread_id, seq, choose(rng), scheduled_ns))
             with lock:
@@ -327,10 +364,15 @@ def prepare_get_objects(plan_bucket: str, cell: Cell, public: RecipientPublic, c
 
     estore = EncryptedObjectStore(MinioStore(Settings.from_env()))
     pool = PayloadPool(min(cell.size + 1, 64 * 1024 * 1024) if cell.size else 1024)
+    session = None
+    if cell.mode == "N1":
+        from pqcstore.crypto.session import SenderSession
+
+        session = SenderSession(public.mlkem, cell.session_policy())
     objects = []
     for i in range(count):
         result = estore.put(plan_bucket, f"{prefix}get-{i}", pool.reader(cell.size, i * 7919),
-                            cell.size, public, chunk_size, cell.mode)
+                            cell.size, public, chunk_size, cell.mode, session)
         objects.append((result.identity.object_key, result.identity.object_version))
     return objects
 
@@ -379,11 +421,22 @@ class ExperimentConfig:
             loads = block["rates"] if loop == "open" else block["concurrency"]
             for size, load, operation in itertools.product(block["sizes"], loads,
                                                            block["operations"]):
-                blocks.append([Cell(mode, size,
-                                    load if loop == "closed" else block.get("threads", 64),
-                                    operation, loop, float(load) if loop == "open" else 0.0,
-                                    block.get("get_fraction", 0.7))
-                               for mode in block["modes"]])
+                cells = []
+                for mode in block["modes"]:
+                    base = Cell(mode, size,
+                                load if loop == "closed" else block.get("threads", 64),
+                                operation, loop, float(load) if loop == "open" else 0.0,
+                                block.get("get_fraction", 0.7))
+                    if mode != "N1":
+                        cells.append(base)
+                        continue
+                    for bmax, aware in itertools.product(block.get("session_bmax", [100]),
+                                                         block.get("queue_aware", [False])):
+                        cells.append(dataclasses.replace(
+                            base, session_bmax=bmax,
+                            session_tmax_s=float(block.get("session_tmax_s", 60)),
+                            queue_aware=bool(aware), session_bmin=block.get("session_bmin", 1)))
+                blocks.append(cells)
         for block in blocks:
             for cell in block:
                 if cell.mode not in MODES:
