@@ -19,8 +19,9 @@ timers or the experiment matrix.
 | 1 | Environment: pinned liboqs, MinIO from source, raw S3 round trip | done |
 | 2 | Crypto MVP: ML-KEM-768 + HKDF + chunked AES-256-GCM (mode P1), tamper tests, milestone M1 | done |
 | 3 | Commit-protocol hardening: failure cleanup, read-after-write check, orphan audit/GC, 100-run soak | done |
-| 4 | Streaming: 128–500 MiB round trips with size-independent memory | next |
-| 5–8 | Baselines, benchmark runner, pilot, final runs | planned |
+| 4 | Streaming: 500 MiB round trips, memory flat in object size (~50 MiB per transfer) | done |
+| 5 | Baselines (B0, B1, R1, B2) on the same data path, benchmark runner, samplers | next |
+| 6–8 | Pilot, candidate algorithm (N1), final runs | planned |
 
 ## Milestone M1: encrypted round trip
 
@@ -54,6 +55,7 @@ make doctor         # prints and checks versions, liboqs, S3 reachability
 make s3-smoke       # raw 1 MiB upload/download, SHA-256 must match
 make test           # unit + integration tests
 make soak           # 100 encrypted round trips, then checks for orphaned versions
+make stream-check   # 16/128/500 MiB round trips; memory growth must not depend on size
 ```
 
 Always run Python through the Makefile targets, or export `OQS_INSTALL_PATH=$PWD/.local/liboqs`
@@ -75,7 +77,8 @@ scripts/           liboqs build script
 src/pqcstore/
   crypto/          ML-KEM adapter, HKDF, chunked AES-GCM, manifest, envelope (P1)
   storage/         MinIO adapter, encrypted store with manifest-as-commit
-  cli.py           doctor, s3-smoke, keygen, put, get, soak, gc
+  benchmark/       payload pool (streamed test data), memory probe
+  cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, gc
 tests/             crypto, tamper, binding, hygiene and MinIO integration tests
 experiments/       raw experiment output (git-ignored)
 ```

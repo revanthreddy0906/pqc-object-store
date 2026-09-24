@@ -190,6 +190,32 @@ def cmd_soak(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_stream_check(args: argparse.Namespace) -> int:
+    """Phase 4 exit check: large round trips with memory growth independent of object size."""
+    from pqcstore.benchmark.memprobe import run_isolated
+
+    mib = 1024 * 1024
+    sizes = [int(float(s) * mib) for s in args.sizes_mib.split(",")]
+    growth, ok = {}, True
+    print(f"{'size':>9}  {'growth (min of runs)':>21}  round trip  (dev laptop, not a result)")
+    for size in sizes:
+        runs = [run_isolated(size, args.bucket, args.chunk_size) for _ in range(args.repeats)]
+        ok = ok and all(r["match"] for r in runs)
+        growth[size] = min(r["growth"] for r in runs)
+        fastest = min(runs, key=lambda r: r["put_ms"] + r["get_ms"])
+        print(f"{size / mib:>5.0f} MiB  {growth[size] / mib:>17.1f} MiB  "
+              f"put {fastest['put_ms']:.0f} ms / get {fastest['get_ms']:.0f} ms"
+              f"{'' if all(r['match'] for r in runs) else '  HASH MISMATCH'}")
+    smallest, largest = min(sizes), max(sizes)
+    spread = growth[largest] - growth[smallest]
+    bounded = spread <= args.tolerance_mib * mib and growth[largest] < largest
+    print(f"growth({largest // mib} MiB) - growth({smallest // mib} MiB) = {spread / mib:.1f} MiB "
+          f"(tolerance {args.tolerance_mib} MiB)")
+    ok = ok and bounded
+    print("PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+
 def cmd_gc(args: argparse.Namespace) -> int:
     from datetime import timedelta
 
@@ -248,6 +274,16 @@ def main(argv: list[str] | None = None) -> int:
     soak.add_argument("--chunk-size", type=int, default=4 * 1024 * 1024)
     soak.add_argument("--keep", action="store_true", help="keep the objects afterwards")
     soak.set_defaults(func=cmd_soak)
+
+    stream = sub.add_parser("stream-check",
+                            help="large-object round trips with bounded memory (Phase 4)")
+    stream.add_argument("--bucket", default="pqc-bench")
+    stream.add_argument("--sizes-mib", default="16,128,500")
+    stream.add_argument("--repeats", type=int, default=2)
+    stream.add_argument("--chunk-size", type=int, default=4 * 1024 * 1024)
+    stream.add_argument("--tolerance-mib", type=int, default=32,
+                        help="allowed growth difference between smallest and largest size")
+    stream.set_defaults(func=cmd_stream_check)
 
     gc = sub.add_parser("gc", help="report and remove uncommitted (orphaned) data objects")
     gc.add_argument("--bucket", default="pqc-bench")

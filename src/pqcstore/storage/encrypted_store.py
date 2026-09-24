@@ -55,23 +55,39 @@ def version_prefix(object_key: str, version: str) -> str:
 
 
 class _IterReader:
-    """File-like `read(n)` over an iterator of byte strings (what minio-py uploads from)."""
+    """File-like `read(n)` over an iterator of byte strings (what minio-py uploads from).
+
+    Keeps the pending pieces as-is and copies each byte exactly once, into the
+    returned part: at 500 concurrent uploads every extra part-sized copy costs GBs.
+    """
 
     def __init__(self, pieces: Iterator[bytes]) -> None:
         self._pieces = pieces
-        self._buffer = bytearray()
+        self._pending: list[memoryview] = []
+        self._pending_bytes = 0
 
     def read(self, size: int = -1) -> bytes:
-        while size < 0 or len(self._buffer) < size:
+        while size < 0 or self._pending_bytes < size:
             piece = next(self._pieces, None)
             if piece is None:
                 break
-            self._buffer += piece
-        if size < 0:
-            size = len(self._buffer)
-        out = bytes(self._buffer[:size])
-        del self._buffer[:size]
-        return out
+            self._pending.append(memoryview(piece))
+            self._pending_bytes += len(piece)
+        if size < 0 or size >= self._pending_bytes:
+            out, self._pending, self._pending_bytes = b"".join(self._pending), [], 0
+            return out
+        taken, remaining = [], size
+        while remaining:
+            head = self._pending[0]
+            if len(head) <= remaining:
+                taken.append(self._pending.pop(0))
+                remaining -= len(head)
+            else:
+                taken.append(head[:remaining])
+                self._pending[0] = head[remaining:]
+                remaining = 0
+        self._pending_bytes -= size
+        return b"".join(taken)
 
 
 @dataclass

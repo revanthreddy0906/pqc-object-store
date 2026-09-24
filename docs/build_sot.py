@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.1 · 24 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.2 · 24 Sep 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.1 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.2 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -290,7 +290,10 @@ T([["Version", "Date", "Change", "Status"],
                           "v1 format was never built: milestone M1 already uses the chunked format (D7, A4); "
                           "(5) implementations must warm up each process before timed operations; the first "
                           "liboqs call costs ~70 ms of library loading (§8.2).",
-    "Pending team review (§1.3)"]],
+    "Pending team review (§1.3)"],
+   ["1.2", "24 Sep 2026", "Phase 4 measurement: per-transfer client memory (§9.4) replaced the estimate "
+                          "with measured values (~50 MiB per large in-flight transfer, independent of "
+                          "object size).", "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
 # ================================================================ 2
@@ -776,8 +779,11 @@ T([["Item", "Estimate", "Consequence"],
    ["Sweeps B + C", "≈ 10 h (large objects bound by network: 500 MiB ≈ 4.4 s at 1 Gb/s, 0.45 s at 10 Gb/s)",
     "Prefer 10 GbE; record iperf3"],
    ["Sweeps D + E + P2", "≈ 6 h", "One batch"],
-   ["Client memory at 500 workers", "~ chunk (4 MiB) × 2 + multipart part buffer per in-flight upload",
-    "Part size 8 MiB (≥ 5 MiB S3 minimum); expect several GB at 500 × 16 MiB; the client VM needs ≥ 32 GB"],
+   ["Client memory at 500 workers", "Measured in Phase 4 (dev laptop): ~40–52 MiB peak RSS growth per "
+                                    "in-flight PUT+GET for objects ≥ 16 MiB, flat up to 500 MiB (8 MiB "
+                                    "parts, 4 MiB chunks); ~3 MiB at 1 MiB objects",
+    "Up to ~25 GB at 500 concurrent large transfers: Sweep A at 16 MiB and Sweep C corners need a 32–64 "
+    "GB client VM; re-measure on the Linux VM (glibc returns large blocks sooner than macOS)"],
    ["Server disk", "GET sets: 20 objects × 5 modes × 500 MiB ≈ 50 GB (+ smaller sizes)",
     "≥ 200 GB dedicated SSD"]],
   [34, 76, 60])
@@ -1045,7 +1051,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.1",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.2",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

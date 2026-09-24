@@ -131,16 +131,19 @@ class ChunkDecryptor:
                 length = chunk_length(index, self._size, self._chunk_size)
                 if len(buffer) < length + TAG_BYTES:
                     break
-                record = bytes(buffer[:length + TAG_BYTES])
+                # Decrypt straight from the buffer (no copy); the view must be released
+                # before the buffer can shrink.
+                with memoryview(buffer) as view:
+                    chunk = self._open(index, length, view[:length + TAG_BYTES])
                 del buffer[:length + TAG_BYTES]
-                yield self._open(index, length, record)
+                yield chunk
                 index += 1
             if index == self.chunk_count and buffer:
                 raise IntegrityError("unexpected data after the final chunk")
         if index < self.chunk_count:
             raise IntegrityError(f"stream truncated: {index} of {self.chunk_count} chunks")
 
-    def _open(self, index: int, length: int, record: bytes) -> bytes:
+    def _open(self, index: int, length: int, record: bytes | memoryview) -> bytes:
         final = index == self.chunk_count - 1
         start = time.perf_counter_ns()
         try:

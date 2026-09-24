@@ -4,7 +4,7 @@ PY := $(VENV)/bin/python
 export OQS_INSTALL_PATH := $(CURDIR)/.local/liboqs
 
 .PHONY: help setup venv liboqs env minio-build services-up services-down services-logs \
-        doctor s3-smoke soak gc test test-unit test-integration lint docs clean
+        doctor s3-smoke soak stream-check gc test test-unit test-integration lint docs clean
 
 help:  ## list targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-18s %s\n", $$1, $$2}'
@@ -43,6 +43,9 @@ s3-smoke:  ## raw 1 MiB upload/download SHA-256 check
 
 soak:  ## 100 consecutive encrypted round trips + orphan audit (Phase 3 exit check)
 	$(PY) -m pqcstore.cli soak --runs 100
+
+stream-check:  ## 16/128/500 MiB round trips with bounded memory (Phase 4 exit check)
+	$(PY) -m pqcstore.cli stream-check
 
 gc:  ## report and remove uncommitted data older than 60 minutes
 	$(PY) -m pqcstore.cli gc
