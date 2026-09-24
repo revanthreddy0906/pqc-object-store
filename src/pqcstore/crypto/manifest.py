@@ -30,15 +30,11 @@ from pqcstore.crypto.chunked_aead import (
     chunk_count,
 )
 from pqcstore.crypto.kdf import canonical_json
+from pqcstore.crypto.modes import MODES
 
 SCHEMA_VERSION = 2
 FORMAT = "pqcs-chunked"
-KDF = "HKDF-SHA256"
-AEAD = "AES-256-GCM"
 SALT_BYTES = 32
-
-# mode -> (key-establishment name, KE ciphertext length). Baselines are added in Phase 5.
-MODES: dict[str, tuple[str, int]] = {"P1": ("ML-KEM-768", 1088)}
 
 CONTEXT_FIELDS = frozenset({
     "schema_version", "format", "tenant", "bucket", "object_key", "object_version", "mode", "ke",
@@ -102,7 +98,7 @@ def new_version() -> str:
 
 def build_context(identity: ObjectIdentity, mode: str, plaintext_size: int, chunk_size: int,
                   recipient_key_id: str, ke_ct: bytes) -> dict[str, Any]:
-    ke, _ = MODES[mode]
+    spec = MODES[mode]
     return {
         "schema_version": SCHEMA_VERSION,
         "format": FORMAT,
@@ -111,9 +107,9 @@ def build_context(identity: ObjectIdentity, mode: str, plaintext_size: int, chun
         "object_key": identity.object_key,
         "object_version": identity.object_version,
         "mode": mode,
-        "ke": ke,
-        "kdf": KDF,
-        "aead": AEAD,
+        "ke": spec.ke,
+        "kdf": spec.kdf,
+        "aead": spec.aead,
         "chunk_size": chunk_size,
         "chunk_count": chunk_count(plaintext_size, chunk_size),
         "plaintext_size": plaintext_size,
@@ -134,8 +130,10 @@ def _require_int(context: dict[str, Any], name: str) -> int:
     return value
 
 
-def parse_manifest(data: bytes, expected: ObjectIdentity,
+def parse_manifest(data: bytes, expected: ObjectIdentity, expected_mode: str,
                    expected_key_id: str | None = None) -> ParsedManifest:
+    """Validate a manifest for the object and mode the reader asked for. Requiring the
+    mode prevents downgrades, e.g. a planted B0 (plaintext) manifest being accepted."""
     try:
         manifest = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -146,12 +144,14 @@ def parse_manifest(data: bytes, expected: ObjectIdentity,
     if not isinstance(context, dict) or set(context) != CONTEXT_FIELDS:
         raise IntegrityError("manifest context has missing or unexpected fields")
 
-    fixed = {"schema_version": SCHEMA_VERSION, "format": FORMAT, "kdf": KDF, "aead": AEAD}
+    if context["mode"] != expected_mode:
+        raise IntegrityError(f"object uses mode {context['mode']!r}, expected {expected_mode!r}")
+    spec = MODES[expected_mode]
+    fixed = {"schema_version": SCHEMA_VERSION, "format": FORMAT, "ke": spec.ke, "kdf": spec.kdf,
+             "aead": spec.aead}
     for name, value in fixed.items():
         if context[name] != value or type(context[name]) is not type(value):
             raise IntegrityError(f"unsupported {name}: {context[name]!r}")
-    if context["mode"] not in MODES or MODES[context["mode"]][0] != context["ke"]:
-        raise IntegrityError(f"unsupported mode/ke: {context['mode']!r}/{context['ke']!r}")
 
     actual = ObjectIdentity(context["tenant"], context["bucket"], context["object_key"],
                             context["object_version"])
@@ -169,7 +169,7 @@ def parse_manifest(data: bytes, expected: ObjectIdentity,
     ke_ct = b64d(manifest["ke_ct"], "ke_ct")
     salt = b64d(manifest["salt"], "salt")
     nonce_prefix = b64d(manifest["nonce_prefix"], "nonce_prefix")
-    if len(ke_ct) != MODES[context["mode"]][1]:
+    if len(ke_ct) != spec.ke_ct_bytes:
         raise IntegrityError("key-establishment ciphertext has the wrong length")
     if len(salt) != SALT_BYTES or len(nonce_prefix) != NONCE_PREFIX_BYTES:
         raise IntegrityError("salt or nonce prefix has the wrong length")

@@ -154,3 +154,39 @@ class ChunkDecryptor:
         finally:
             self.aead_ns += time.perf_counter_ns() - start
         return chunk
+
+
+class PlainChunker:
+    """Mode B0: the same chunked streaming with no cryptography, so B0 measures the raw
+    S3 + harness cost of the identical data path. Length is still enforced."""
+
+    aead_ns = 0
+
+    def __init__(self, plaintext_size: int, chunk_size: int = DEFAULT_CHUNK_SIZE) -> None:
+        self._size = plaintext_size
+        self._chunk_size = chunk_size
+        self.chunk_count = chunk_count(plaintext_size, chunk_size)
+
+    def records(self, reader: BinaryIO) -> Iterator[bytes]:
+        for index in range(self.chunk_count):
+            length = chunk_length(index, self._size, self._chunk_size)
+            data = _read_exact(reader, length)
+            if len(data) != length:
+                raise ValueError(f"plaintext ended early at chunk {index}")
+            if index == self.chunk_count - 1 and _read_exact(reader, 1):
+                raise ValueError("plaintext is longer than plaintext_size")
+            yield data
+
+    def plaintext(self, stream: Iterable[bytes]) -> Iterator[bytes]:
+        received = 0
+        for piece in stream:
+            received += len(piece)
+            if received > self._size:
+                raise IntegrityError("unexpected data after the declared size")
+            yield bytes(piece)
+        if received != self._size:
+            raise IntegrityError(f"stream truncated: {received} of {self._size} bytes")
+
+
+def stored_size(plaintext_size: int, chunk_size: int, encrypted: bool) -> int:
+    return ciphertext_size(plaintext_size, chunk_size) if encrypted else plaintext_size

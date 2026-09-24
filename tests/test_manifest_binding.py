@@ -94,12 +94,12 @@ def test_malformed_manifest_is_rejected(identity, sealed, mutate):
     doc = json.loads(manifest)
     mutate(doc)
     with pytest.raises(ca.IntegrityError):
-        parse_manifest(json.dumps(doc).encode(), identity)
+        parse_manifest(json.dumps(doc).encode(), identity, "P1")
 
 
 def test_non_json_manifest_is_rejected(identity):
     with pytest.raises(ca.IntegrityError):
-        parse_manifest(b"\xff\xfe not json", identity)
+        parse_manifest(b"\xff\xfe not json", identity, "P1")
 
 
 def test_versions_are_time_ordered_uuid7():

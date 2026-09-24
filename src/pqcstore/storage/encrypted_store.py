@@ -21,8 +21,9 @@ from typing import BinaryIO
 from minio.error import S3Error
 
 from pqcstore.crypto import envelope
-from pqcstore.crypto.chunked_aead import DEFAULT_CHUNK_SIZE, ciphertext_size
+from pqcstore.crypto.chunked_aead import DEFAULT_CHUNK_SIZE, stored_size
 from pqcstore.crypto.manifest import ObjectIdentity, new_version
+from pqcstore.crypto.modes import MODES, RecipientPrivate, RecipientPublic
 from pqcstore.storage.minio_store import MinioStore
 from pqcstore.timing import Stages
 
@@ -105,17 +106,18 @@ class EncryptedObjectStore:
         self.tenant = tenant
 
     def put(self, bucket: str, object_key: str, reader: BinaryIO, plaintext_size: int,
-            recipient_public_key: bytes, chunk_size: int = DEFAULT_CHUNK_SIZE) -> TransferResult:
+            recipient: RecipientPublic | bytes, chunk_size: int = DEFAULT_CHUNK_SIZE,
+            mode: str = envelope.DEFAULT_MODE) -> TransferResult:
         """Encrypt and upload a new version. Time spent in `reader.read` is counted in
         s3_ns, so timed runs read from the in-memory payload pool."""
         start = time.perf_counter_ns()
         identity = ObjectIdentity(self.tenant, bucket, object_key, new_version())
         result = TransferResult(identity)
         stages = result.stages
-        manifest_bytes, encryptor = envelope.seal(recipient_public_key, identity, plaintext_size,
-                                                  stages, chunk_size)
+        manifest_bytes, encryptor = envelope.seal(recipient, identity, plaintext_size, stages,
+                                                  chunk_size, mode)
         prefix = version_prefix(object_key, identity.object_version)
-        stored = ciphertext_size(plaintext_size, chunk_size)
+        stored = stored_size(plaintext_size, chunk_size, MODES[mode].encrypts)
 
         upload_start = time.perf_counter_ns()
         try:
@@ -200,8 +202,9 @@ class EncryptedObjectStore:
                 versions.append(version)
         return sorted(versions)
 
-    def get(self, bucket: str, object_key: str, recipient_private_key: bytes, sink: BinaryIO,
-            version: str | None = None, expected_key_id: str | None = None) -> TransferResult:
+    def get(self, bucket: str, object_key: str, recipient: RecipientPrivate | bytes,
+            sink: BinaryIO, version: str | None = None, expected_key_id: str | None = None,
+            mode: str = envelope.DEFAULT_MODE) -> TransferResult:
         """Decrypt into `sink`. Data written to `sink` is only trustworthy if this returns;
         on IntegrityError the caller must discard it. Benchmarks should pass `version`;
         otherwise the LIST that finds the latest version is counted as S3 time.
@@ -230,8 +233,8 @@ class EncryptedObjectStore:
             raise
         manifest_fetch_ns = time.perf_counter_ns() - fetch_start
 
-        decryptor = envelope.open_manifest(recipient_private_key, manifest_bytes, identity,
-                                           stages, expected_key_id)
+        decryptor = envelope.open_manifest(recipient, manifest_bytes, identity, stages,
+                                           expected_key_id, mode)
         download_start = time.perf_counter_ns()
         stored = 0
 
