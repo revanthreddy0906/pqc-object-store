@@ -115,3 +115,12 @@ def test_scrape_parses_labelled_metrics(monkeypatch):
                         lambda url, timeout: io.BytesIO(text.encode()))
     values = samplers.scrape_minio("http://x")
     assert values == {"proc_cpu_seconds": 1.5, "drive_free_bytes": 2.5e9}
+
+
+def test_metrics_url_can_be_overridden_for_remote_servers(tmp_path, monkeypatch):
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({"experiment_id": "t", "blocks": [],
+                                    "server_metrics_url": "http://127.0.0.1:9000/x"}))
+    assert ExperimentConfig.load(path).server_metrics_url == "http://127.0.0.1:9000/x"
+    monkeypatch.setenv("PQC_METRICS_URL", "http://10.0.0.5:9000/minio/v2/metrics/node")
+    assert ExperimentConfig.load(path).server_metrics_url.startswith("http://10.0.0.5")

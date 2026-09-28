@@ -412,6 +412,10 @@ class ExperimentConfig:
     def load(cls, path: Path) -> ExperimentConfig:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         known = {k: v for k, v in raw.items() if k in cls.__dataclass_fields__}
+        # On the AWS testbed the storage server is remote: the setup script exports its
+        # metrics URL so the same configs run locally and on the VMs.
+        if os.environ.get("PQC_METRICS_URL"):
+            known["server_metrics_url"] = os.environ["PQC_METRICS_URL"]
         return cls(**known, raw=raw)
 
     def cells(self) -> list[list[Cell]]:
@@ -453,7 +457,8 @@ def _git_commit() -> str:
                                capture_output=True, text=True, check=True).stdout.strip()
         return commit + ("-dirty" if dirty else "")
     except (OSError, subprocess.CalledProcessError):
-        return "unknown"
+        # Deployed from `git archive` (no .git): the provisioning step records the commit.
+        return os.environ.get("PQC_GIT_COMMIT", "unknown")
 
 
 def environment_info() -> dict[str, Any]:
