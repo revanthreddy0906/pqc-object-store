@@ -174,9 +174,11 @@ run_experiment() {
   fi
   echo "=== $STAMP starting $config (commit $PQC_GIT_COMMIT)"
   local status=0 out="$HOME/pqc-bench-$STAMP.out"
+  set +e   # capture the benchmark's own exit code (with `|| true` it would be lost)
   .venv/bin/python -u -m pqcstore.cli bench --config "$config" 2>&1 \
-    | grep -v --line-buffered "faulthandler is disabled" | tee "$out" || true
+    | grep -v --line-buffered "faulthandler is disabled" | tee "$out"
   status=${PIPESTATUS[0]}
+  set -e
   local run_dir; run_dir="$(sed -n 's/^wrote \(experiments\/[^ ]*\) (.*/\1/p' "$out" | tail -1)"
   if [[ -n "$run_dir" ]]; then
     .venv/bin/python -m pqcstore.cli validate "$run_dir" 2>&1 | grep -v "faulthandler" || true
