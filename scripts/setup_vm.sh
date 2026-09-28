@@ -14,12 +14,17 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 export DEBIAN_FRONTEND=noninteractive
 
 apt_install() {
-  sudo apt-get update -qq
-  sudo apt-get install -y -qq "$@" >/dev/null
+  # `sudo` drops exported variables, so the non-interactive settings go on the command line.
+  # iperf3 asks whether to start a daemon; answer no (setup_server runs its own unit).
+  echo "iperf3 iperf3/start_daemon boolean false" | sudo debconf-set-selections
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
+  sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@" </dev/null >/dev/null
 }
 
 setup_server() {
   : "${MINIO_ROOT_PASSWORD:?}"
+  echo "[server] installing packages..."
   apt_install docker.io fio iperf3 jq curl
   sudo usermod -aG docker ubuntu
 
@@ -40,6 +45,7 @@ setup_server() {
   local tag image
   tag="$(grep -m1 '^ARG MINIO_TAG=' docker/minio.Dockerfile | cut -d= -f2)"
   image="pqc-minio:$tag"
+  echo "[server] building MinIO $tag from source (5-10 minutes)..."
   sudo docker build -q -f docker/minio.Dockerfile -t "$image" . >/dev/null
   local uid; uid="$(sudo docker run --rm --entrypoint id "$image" -u)"
   sudo chown -R "$uid" /data
@@ -117,7 +123,9 @@ EOF
 
 setup_client() {
   : "${MINIO_ROOT_PASSWORD:?}" "${SERVER_IP:?}"
+  echo "[client] installing packages..."
   apt_install build-essential cmake git python3.12-venv python3.12-dev tmux iperf3 jq curl rsync
+  echo "[client] building liboqs and the Python environment..."
   make liboqs venv
   umask 077
   cat > .env <<EOF
