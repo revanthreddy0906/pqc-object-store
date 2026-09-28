@@ -167,19 +167,27 @@ run_experiment() {
   export PQC_METRICS_URL="http://$server:9000/minio/v2/metrics/node"
   export PQC_GIT_COMMIT="$(cat GIT_COMMIT 2>/dev/null || echo unknown)"
   export OQS_INSTALL_PATH="$PWD/.local/liboqs"   # the Makefile sets this; direct calls must too
-  echo "=== $STAMP starting $config (commit $PQC_GIT_COMMIT)"
-  local status=0
-  .venv/bin/python -u -m pqcstore.cli bench --config "$config" || status=$?
-  if (( status == 0 )); then
-    make validate-results || true
-  else
-    echo "=== bench FAILED with exit code $status (see the lines above)"
+  # A previous run's pending auto-stop must not shut this run down.
+  if [[ -f /tmp/pqc-autostop.pid ]]; then
+    kill "$(cat /tmp/pqc-autostop.pid)" 2>/dev/null && echo "=== cancelled the previous run's auto-stop"
+    rm -f /tmp/pqc-autostop.pid
   fi
+  echo "=== $STAMP starting $config (commit $PQC_GIT_COMMIT)"
+  local status=0 out="$HOME/pqc-bench-$STAMP.out"
+  .venv/bin/python -u -m pqcstore.cli bench --config "$config" 2>&1 \
+    | grep -v --line-buffered "faulthandler is disabled" | tee "$out" || true
+  status=${PIPESTATUS[0]}
+  local run_dir; run_dir="$(sed -n 's/^wrote \(experiments\/[^ ]*\) (.*/\1/p' "$out" | tail -1)"
+  if [[ -n "$run_dir" ]]; then
+    .venv/bin/python -m pqcstore.cli validate "$run_dir" 2>&1 | grep -v "faulthandler" || true
+  fi
+  (( status == 0 )) || echo "=== bench FAILED with exit code $status (see the lines above)"
   if [[ "${NO_AUTOSTOP:-0}" != 1 ]]; then
     # A scheduled `shutdown +N` blocks new logins at once; wait in the background instead so
-    # the log can still be read during the grace period.
+    # the log can still be read during the grace period. A new run cancels this.
     echo "=== done; stopping this VM in 10 minutes (set NO_AUTOSTOP=1 to keep it running)"
     nohup bash -c 'sleep 600; sudo shutdown -h now' >/dev/null 2>&1 &
+    echo $! > /tmp/pqc-autostop.pid
   fi
 }
 
