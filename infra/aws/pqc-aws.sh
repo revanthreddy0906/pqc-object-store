@@ -5,6 +5,7 @@
 #   infra/aws/pqc-aws.sh check       read-only: credentials, quota, instance types (free)
 #   infra/aws/pqc-aws.sh up          create key pair, firewall, placement group, 2 VMs  (COSTS MONEY)
 #   infra/aws/pqc-aws.sh provision   copy the repo to both VMs and install everything
+#   infra/aws/pqc-aws.sh update      push newly committed code (fast; keeps builds and data)
 #   infra/aws/pqc-aws.sh baseline    network (iperf3) and disk (fio) baselines
 #   infra/aws/pqc-aws.sh run CONFIG  start an experiment on the client in tmux (survives logout)
 #   infra/aws/pqc-aws.sh logs        follow the running experiment
@@ -154,6 +155,22 @@ cmd_provision() {
   echo "Provisioned. Next: $0 baseline"
 }
 
+cmd_update() {  # push committed code only; keeps builds, .env and experiments on the VMs
+  load_state
+  if [[ -n "$(git -C "$REPO" status --porcelain --untracked-files=no)" ]]; then
+    echo "warning: uncommitted changes are NOT deployed; only commit $(git -C "$REPO" rev-parse --short HEAD) is"
+  fi
+  local bundle commit; bundle="$(mktemp -d)/pqc.tar.gz"; commit="$(git -C "$REPO" rev-parse HEAD)"
+  git -C "$REPO" archive --format=tar.gz -o "$bundle" HEAD
+  for id in "$SERVER_ID" "$CLIENT_ID"; do
+    local host; host="$(public_ip "$id")"
+    scp "${SSH_OPTS[@]}" "$bundle" "ubuntu@$host:pqc.tar.gz" >/dev/null
+    remote "$host" "tar -xzf pqc.tar.gz -C pqc && rm pqc.tar.gz && echo $commit > pqc/GIT_COMMIT"
+  done
+  rm -f "$bundle"
+  echo "Updated both VMs to $(git -C "$REPO" rev-parse --short HEAD)"
+}
+
 cmd_baseline() {
   load_state
   local server_ip; server_ip="$(public_ip "$SERVER_ID")"
@@ -170,7 +187,7 @@ cmd_run() {
   remote "$(public_ip "$CLIENT_ID")" "cd pqc && mkdir -p experiments && tmux new-session -d -s bench \
     'bash scripts/setup_vm.sh run $config $SERVER_PRIVATE_IP 2>&1 | tee -a experiments/bench.log'"
   echo "Started $config in tmux session 'bench' on the client. Follow with: $0 logs"
-  echo "The client stops itself when the experiment ends; the server stops after 60 idle minutes."
+  echo "The client stops itself 10 minutes after the experiment ends; the server after 60 idle minutes."
 }
 
 cmd_logs() { load_state; remote "$(public_ip "$CLIENT_ID")" "tail -n 50 -f pqc/experiments/bench.log"; }
@@ -205,9 +222,10 @@ cmd_destroy() {
 }
 
 case "${1:-}" in
-  check) cmd_check ;; up) cmd_up ;; provision) cmd_provision ;; baseline) cmd_baseline ;;
+  check) cmd_check ;; up) cmd_up ;; provision) cmd_provision ;; update) cmd_update ;;
+  baseline) cmd_baseline ;;
   run) shift; cmd_run "$@" ;; logs) cmd_logs ;; fetch) cmd_fetch ;;
   ssh) shift; cmd_ssh "$@" ;; status) cmd_status ;;
   stop) cmd_stop ;; start) cmd_start ;; destroy) cmd_destroy ;;
-  *) sed -n '2,17p' "$0"; exit 1 ;;
+  *) sed -n '2,18p' "$0"; exit 1 ;;
 esac

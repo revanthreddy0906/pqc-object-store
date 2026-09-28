@@ -19,8 +19,8 @@ infra/aws/pqc-aws.sh provision   # ~15 min: installs everything, runs the test s
 infra/aws/pqc-aws.sh baseline    # iperf3 network + fio disk baselines
 ```
 
-`provision` deploys the **committed** code (`git archive HEAD`). Commit before provisioning, and
-provision again after changing code.
+`provision` deploys the **committed** code (`git archive HEAD`). After committing a change, push it
+with `infra/aws/pqc-aws.sh update` (seconds; keeps builds, credentials and data).
 
 ## Each experiment
 
@@ -36,7 +36,7 @@ The run continues if your laptop sleeps or disconnects (tmux on the client).
 
 ## Cost guards
 
-- The client stops itself 2 minutes after an experiment ends (`NO_AUTOSTOP=1` disables this).
+- The client stops itself 10 minutes after an experiment ends (`NO_AUTOSTOP=1` disables this).
 - Both VMs stop themselves after 60 minutes with no benchmark activity.
 - `infra/aws/pqc-aws.sh stop` stops both immediately; stopped VMs bill only for disks.
 - `infra/aws/pqc-aws.sh destroy` removes every resource the script created (asks you to type `destroy`).

@@ -166,12 +166,20 @@ run_experiment() {
   local config=${1:?config} server=${2:?server ip}
   export PQC_METRICS_URL="http://$server:9000/minio/v2/metrics/node"
   export PQC_GIT_COMMIT="$(cat GIT_COMMIT 2>/dev/null || echo unknown)"
+  export OQS_INSTALL_PATH="$PWD/.local/liboqs"   # the Makefile sets this; direct calls must too
   echo "=== $STAMP starting $config (commit $PQC_GIT_COMMIT)"
-  .venv/bin/python -u -m pqcstore.cli bench --config "$config" || echo "bench exited with $?"
-  make validate-results || true
+  local status=0
+  .venv/bin/python -u -m pqcstore.cli bench --config "$config" || status=$?
+  if (( status == 0 )); then
+    make validate-results || true
+  else
+    echo "=== bench FAILED with exit code $status (see the lines above)"
+  fi
   if [[ "${NO_AUTOSTOP:-0}" != 1 ]]; then
-    echo "=== done; stopping this VM in 2 minutes (set NO_AUTOSTOP=1 to keep it running)"
-    sudo shutdown -h +2
+    # A scheduled `shutdown +N` blocks new logins at once; wait in the background instead so
+    # the log can still be read during the grace period.
+    echo "=== done; stopping this VM in 10 minutes (set NO_AUTOSTOP=1 to keep it running)"
+    nohup bash -c 'sleep 600; sudo shutdown -h now' >/dev/null 2>&1 &
   fi
 }
 
