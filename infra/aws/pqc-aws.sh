@@ -202,7 +202,17 @@ cmd_fetch() {
 
 cmd_stop()  { load_state; "${AWS[@]}" ec2 stop-instances --instance-ids "$SERVER_ID" "$CLIENT_ID" >/dev/null
   echo "Stopping. Disks are kept (~\$${DISK_USD_MONTH}/month); compute billing stops."; }
-cmd_start() { load_state; "${AWS[@]}" ec2 start-instances --instance-ids "$SERVER_ID" "$CLIENT_ID" >/dev/null
+cmd_start() {
+  load_state
+  local id state
+  for id in "$SERVER_ID" "$CLIENT_ID"; do   # a VM still shutting down cannot be started yet
+    state="$("${AWS[@]}" ec2 describe-instances --instance-ids "$id" --query 'Reservations[0].Instances[0].State.Name')"
+    if [[ "$state" == stopping || "$state" == shutting-down ]]; then
+      echo "$id is $state; waiting for it to stop first..."
+      "${AWS[@]}" ec2 wait instance-stopped --instance-ids "$id"
+    fi
+  done
+  "${AWS[@]}" ec2 start-instances --instance-ids "$SERVER_ID" "$CLIENT_ID" >/dev/null
   "${AWS[@]}" ec2 wait instance-running --instance-ids "$SERVER_ID" "$CLIENT_ID"; cmd_status; }
 
 cmd_destroy() {
