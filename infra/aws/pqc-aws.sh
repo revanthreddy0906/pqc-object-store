@@ -226,6 +226,7 @@ cmd_start() {
   "${AWS[@]}" ec2 wait instance-running --instance-ids "$SERVER_ID" "$CLIENT_ID"; cmd_status; }
 
 cmd_destroy() {
+  [[ "${FUNCNAME[1]:-}" == main ]] || die "destroy may only be called from the command line"
   load_state
   echo "This terminates both VMs and deletes their disks, the firewall, placement group and key pair."
   echo "Run '$0 fetch' first if you need the data. Type 'destroy' to continue:"
@@ -241,11 +242,18 @@ cmd_destroy() {
   echo "Everything created by this script is gone."
 }
 
-case "${1:-}" in
-  check) cmd_check ;; up) cmd_up ;; provision) cmd_provision ;; update) cmd_update ;;
-  baseline) cmd_baseline ;;
-  run) shift; cmd_run "$@" ;; logs) cmd_logs ;; fetch) cmd_fetch ;;
-  ssh) shift; cmd_ssh "$@" ;; status) cmd_status ;;
-  stop) cmd_stop ;; start) cmd_start ;; destroy) cmd_destroy ;;
-  *) sed -n '2,18p' "$0"; exit 1 ;;
-esac
+main() {
+  case "${1:-}" in
+    check) cmd_check ;; up) cmd_up ;; provision) cmd_provision ;; update) cmd_update ;;
+    baseline) cmd_baseline ;;
+    run) shift; cmd_run "$@" ;; logs) cmd_logs ;; fetch) cmd_fetch ;;
+    ssh) shift; cmd_ssh "$@" ;; status) cmd_status ;;
+    stop) cmd_stop ;; start) cmd_start ;; destroy) cmd_destroy ;;
+    *) sed -n '2,18p' "$0"; exit 1 ;;
+  esac
+}
+
+# Bash reads a script from disk while it runs. `main` and `exit` sit on one line, so bash has
+# already read the whole file before any command runs; editing or `git pull`-ing this file
+# during a long command (e.g. `start` waiting) can then never execute stray lines.
+main "$@"; exit $?
