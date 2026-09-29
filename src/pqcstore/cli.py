@@ -232,6 +232,21 @@ def cmd_bench(args: argparse.Namespace) -> int:
     return 1 if invalid else 0
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    from pqcstore.benchmark.runner import plan_experiment
+
+    total_hours = total_usd = 0.0
+    for config in args.configs:
+        p = plan_experiment(Path(config), args.hourly_usd)
+        total_hours += p["hours"]
+        total_usd += p["usd"]
+        print(f"{config}: {p['cells']} cells x reps = {p['runs']} runs, "
+              f"~{p['seconds_per_run']:.0f} s each -> ~{p['hours']} h, ~${p['usd']}")
+    if len(args.configs) > 1:
+        print(f"total: ~{total_hours:.1f} h, ~${total_usd:.0f} at ${args.hourly_usd}/h")
+    return 0
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     from pqcstore.benchmark.validate import validate
 
@@ -348,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("--config", required=True)
     bench.add_argument("--out", default="experiments")
     bench.set_defaults(func=cmd_bench)
+
+    plan = sub.add_parser("plan", help="estimate runs, hours and cost of experiment configs")
+    plan.add_argument("configs", nargs="+")
+    plan.add_argument("--hourly-usd", type=float, default=2.3,
+                      help="both VMs together (default: i4i.4xlarge + c7i.4xlarge)")
+    plan.set_defaults(func=cmd_plan)
 
     validate = sub.add_parser("validate", help="validate an experiment output directory")
     validate.add_argument("run_dir")

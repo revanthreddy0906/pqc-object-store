@@ -124,3 +124,39 @@ def test_metrics_url_can_be_overridden_for_remote_servers(tmp_path, monkeypatch)
     assert ExperimentConfig.load(path).server_metrics_url == "http://127.0.0.1:9000/x"
     monkeypatch.setenv("PQC_METRICS_URL", "http://10.0.0.5:9000/minio/v2/metrics/node")
     assert ExperimentConfig.load(path).server_metrics_url.startswith("http://10.0.0.5")
+
+
+def test_settle_waits_until_disk_writes_stop(monkeypatch):
+    from pqcstore.benchmark import runner, samplers
+
+    written = iter([0, 100e6, 200e6, 200e6 + 1, 200e6 + 2, 200e6 + 3, 200e6 + 4])
+    monkeypatch.setattr(samplers, "scrape_minio", lambda url: {"io_write_bytes": next(written)})
+    monkeypatch.setattr(runner.time, "sleep", lambda s: None)
+    runner.settle("http://x", max_s=60)
+    assert next(written) == 200e6 + 3  # stopped after two quiet one-second intervals
+
+
+def test_settle_disabled_or_metric_missing(monkeypatch):
+    from pqcstore.benchmark import runner, samplers
+
+    assert runner.settle(None, 30) == 0.0
+    assert runner.settle("http://x", 0) == 0.0
+    monkeypatch.setattr(samplers, "scrape_minio", lambda url: {})
+    slept = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    runner.settle("http://x", max_s=30)
+    assert slept == [5.0]
+
+
+def test_plan_counts_runs_and_cost(tmp_path):
+    from pqcstore.benchmark.runner import plan_experiment
+
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({
+        "experiment_id": "t", "repetitions": 5, "warmup_s": 5, "duration_s": 20,
+        "settle_max_s": 30,
+        "blocks": [{"sizes": [1024, 2048], "concurrency": [1, 8], "operations": ["put"],
+                    "modes": ["B1", "P1"]}]}))
+    p = plan_experiment(path, hourly_usd=2.0)
+    assert p["cells"] == 8 and p["runs"] == 40 and p["seconds_per_run"] == 33
+    assert p["hours"] == round(40 * 33 / 3600, 1) and p["usd"] == round(40 * 33 / 3600 * 2.0, 1)

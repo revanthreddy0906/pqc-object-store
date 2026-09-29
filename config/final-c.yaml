@@ -1,0 +1,38 @@
+# Final batch C: bounded session amortization (Sweep E) and open-loop load for the queueing
+# model (Sweep D). The open-loop rates are PROVISIONAL: set them from batch A's measured
+# capacity (about 0.3x ... 1.1x of the saturation throughput) before running this batch.
+experiment_id: final-c
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 5
+duration_s: 20
+settle_max_s: 30
+get_objects: 32
+pool_bytes: 67108864
+seed: 20261003
+blocks:
+  - sizes: [1024, 65536]              # Sweep E: N1 vs per-object ML-KEM and the symmetric floor
+    concurrency: [1, 32, 128]
+    operations: [put, get]
+    modes: [B1, P1, N1]
+    session_bmax: [10, 100, 1000]
+    session_tmax_s: 60
+    queue_aware: [false]
+  - loop: open                        # queue-aware vs fixed bound at equal offered load
+    sizes: [1024]
+    rates: [1000, 3000, 6000]
+    threads: 128
+    operations: [put]
+    modes: [P1, N1]
+    session_bmax: [100]
+    session_bmin: 1
+    session_tmax_s: 60
+    queue_aware: [false, true]
+  - loop: open                        # Sweep D: offered load around saturation (queueing model)
+    sizes: [1024, 65536]
+    rates: [500, 1000, 2000, 4000, 6000, 8000]
+    threads: 256
+    operations: [put]
+    modes: [B1, P1]

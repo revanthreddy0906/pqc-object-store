@@ -29,19 +29,8 @@ setup_server() {
   apt_install docker.io fio iperf3 jq curl
   sudo usermod -aG docker ubuntu
 
-  # The only disk with nothing mounted on it is the MinIO data disk.
-  local dev=""
-  for d in $(lsblk -dpno NAME,TYPE | awk '$2=="disk"{print $1}'); do
-    [[ -z "$(lsblk -no MOUNTPOINT "$d" | tr -d '[:space:]')" ]] && dev=$d && break
-  done
-  if ! mountpoint -q /data; then
-    [[ -n "$dev" ]] || { echo "no unmounted data disk found"; exit 1; }
-    sudo blkid "$dev" >/dev/null || sudo mkfs.xfs -q "$dev"
-    sudo mkdir -p /data
-    echo "UUID=$(sudo blkid -s UUID -o value "$dev") /data xfs defaults,noatime,nofail 0 2" \
-      | sudo tee -a /etc/fstab >/dev/null
-    sudo mount /data
-  fi
+  install_data_disk_service   # format (if blank) and mount /data now and at every boot
+  sudo systemctl start pqc-data-disk
 
   local tag image
   tag="$(grep -m1 '^ARG MINIO_TAG=' docker/minio.Dockerfile | cut -d= -f2)"
@@ -49,13 +38,14 @@ setup_server() {
   echo "[server] building MinIO $tag from source (5-10 minutes)..."
   sudo docker build -q -f docker/minio.Dockerfile -t "$image" . >/dev/null
   local uid; uid="$(sudo docker run --rm --entrypoint id "$image" -u)"
+  echo "$uid" | sudo tee /etc/pqc-minio-uid >/dev/null
   sudo chown -R "$uid" /data
   sudo docker rm -f pqc-minio >/dev/null 2>&1 || true
   # Host networking: no Docker NAT between the benchmark and the store.
   sudo docker run -d --name pqc-minio --restart unless-stopped --network host \
     -v /data:/data \
     -e MINIO_ROOT_USER=pqcadmin -e MINIO_ROOT_PASSWORD="$MINIO_ROOT_PASSWORD" \
-    -e MINIO_PROMETHEUS_AUTH_TYPE=public -e MINIO_API_DELETE_CLEANUP_INTERVAL=30s \
+    -e MINIO_PROMETHEUS_AUTH_TYPE=public -e MINIO_API_DELETE_CLEANUP_INTERVAL=5s \
     "$image" >/dev/null
   for _ in $(seq 60); do curl -fsS http://127.0.0.1:9000/minio/health/live && break; sleep 1; done
   echo "MinIO $(sudo docker exec pqc-minio minio --version | head -1)"
@@ -75,6 +65,44 @@ EOF
   sudo systemctl daemon-reload
   sudo systemctl enable --now iperf3-server >/dev/null 2>&1
   echo "server ready"
+}
+
+# MinIO's data disk. An instance-store NVMe comes back blank after every stop/start, so this runs
+# at each boot before Docker: format the disk if it has no filesystem, mount it on /data and give
+# it to the MinIO user. An EBS data disk keeps its filesystem and is only mounted.
+install_data_disk_service() {
+  sudo tee /usr/local/bin/pqc-data-disk >/dev/null <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+mountpoint -q /data && exit 0
+dev=""
+for d in $(lsblk -dpno NAME,TYPE | awk '$2=="disk"{print $1}'); do
+  # The root disk has mounted partitions; the data disk has none.
+  [[ -z "$(lsblk -no MOUNTPOINT "$d" | tr -d '[:space:]')" ]] && dev=$d && break
+done
+[[ -n "$dev" ]] || { echo "pqc-data-disk: no unmounted data disk found" >&2; exit 1; }
+blkid "$dev" >/dev/null 2>&1 || mkfs.xfs -q -f "$dev"
+mkdir -p /data
+mount -o noatime "$dev" /data
+[[ -f /etc/pqc-minio-uid ]] && chown "$(cat /etc/pqc-minio-uid)" /data
+echo "pqc-data-disk: $dev mounted on /data"
+SCRIPT
+  sudo chmod 755 /usr/local/bin/pqc-data-disk
+  sudo tee /etc/systemd/system/pqc-data-disk.service >/dev/null <<'UNIT'
+[Unit]
+Description=Prepare and mount MinIO's data disk (instance store is blank after stop/start)
+DefaultDependencies=no
+After=local-fs.target
+Before=docker.service
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/pqc-data-disk
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable pqc-data-disk >/dev/null 2>&1
 }
 
 # Cost guard: stop the VM after 60 minutes without benchmark activity.

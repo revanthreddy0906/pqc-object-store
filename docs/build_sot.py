@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.4 · 24 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.5 · 29 Sep 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.4 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.5 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -316,6 +316,19 @@ T([["Version", "Date", "Change", "Status"],
                           "AWS Encryption SDK cache: bounded reuse itself is not claimed as new; "
                           "the queue-aware policy and the Sweep E trade-off evaluation are "
                           "(docs/n1-prior-art.md, §4.5); (5) config/n1.yaml implements Sweep E.",
+    "Pending team review (§1.3)"],
+   ["1.5", "29 Sep 2026", "Phase 6 (pilot on AWS: 800 runs, 30.0M measured requests, 0 failures) "
+                          "and final design: (1) testbed is AWS ap-south-2, c7i.4xlarge client and "
+                          "i4i.4xlarge MinIO server on local NVMe; in the pilot the 8-vCPU server's "
+                          "500 MB/s gp3 cap limited every PUT and its CPU limited small GETs at 32 "
+                          "workers (§10); (2) runs pause after each run until MinIO stops writing "
+                          "(purging deleted objects made small PUTs bimodal) (§9.3); (3) median "
+                          "run-to-run CV was 2%, so the final uses 5 repetitions with 5 s warm-up "
+                          "and 20 s measured; (4) final matrix trimmed to the budget: concurrency "
+                          "1-500 at 64 KiB and 1 MiB, 16 MiB up to 128 workers (client memory), sizes "
+                          "1 KiB-500 MiB at 1 worker plus corners, N1 and open-loop batches; about "
+                          "15 h and $35 (config/final-a|b|c.yaml, `pqcstore plan`) (§9.2, §9.4); "
+                          "(5) raw records are compressed with zstd at the end of each experiment.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1079,7 +1092,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.4",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.5",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

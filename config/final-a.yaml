@@ -1,0 +1,27 @@
+# Final batch A: concurrency sweep (SoT §9.2 Sweep A, trimmed to the budget after the pilot).
+# Testbed: c7i.4xlarge client, i4i.4xlarge MinIO (local NVMe). Results of record (SoT D13).
+# 16 MiB stops at 128 workers: 500 x 16 MiB in flight needs ~25 GB of client memory (Phase 4).
+experiment_id: final-a
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 5              # pilot: no drift after warm-up in unsaturated cells
+duration_s: 20           # pilot: median run-to-run CV 2% with 30 s; 20 s keeps it within budget
+settle_max_s: 30         # wait for MinIO to finish purging the previous run's objects
+get_objects: 32
+pool_bytes: 67108864
+seed: 20261001
+blocks:
+  - sizes: [65536, 1048576]
+    concurrency: [1, 8, 32, 128, 256, 500]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1]
+  - sizes: [16777216]
+    concurrency: [1, 8, 32, 128]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1]
+  - sizes: [1048576]      # hybrid migration mode on the same concurrency grid
+    concurrency: [1, 8, 32, 128, 500]
+    operations: [put, get]
+    modes: [P2]

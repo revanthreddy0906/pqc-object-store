@@ -75,7 +75,8 @@ cmd_up() {
     "Name=availability-zone,Values=$AZ" --query 'Subnets[0].SubnetId')"
   [[ "$subnet" == subnet-* ]] || die "no default subnet in $AZ"
 
-  echo "Creating in $REGION ($AZ): $CLIENT_TYPE client + $SERVER_TYPE server, ${DATA_GB} GB data disk"
+  local data_desc="instance-store NVMe"; (( DATA_GB > 0 )) && data_desc="${DATA_GB} GB gp3"
+  echo "Creating in $REGION ($AZ): $CLIENT_TYPE client + $SERVER_TYPE server (MinIO data: $data_desc)"
   echo "Ubuntu AMI $ami; SSH allowed only from $my_ip; ~\$${HOURLY_USD}/h while running"
   : > "$STATE"
   save_state REGION "$REGION" AZ "$AZ"
@@ -118,7 +119,10 @@ cmd_up() {
                            "ResourceType=volume,Tags=[$TAGS]" \
       --query 'Instances[0].InstanceId'
   }
-  local data_disk=",{\"DeviceName\":\"/dev/sdf\",\"Ebs\":{\"VolumeSize\":$DATA_GB,\"VolumeType\":\"gp3\",\"Iops\":$DATA_IOPS,\"Throughput\":$DATA_MBPS,\"DeleteOnTermination\":true}}"
+  local data_disk=""   # DATA_GB=0: the server type's instance-store NVMe holds MinIO's data
+  if (( DATA_GB > 0 )); then
+    data_disk=",{\"DeviceName\":\"/dev/sdf\",\"Ebs\":{\"VolumeSize\":$DATA_GB,\"VolumeType\":\"gp3\",\"Iops\":$DATA_IOPS,\"Throughput\":$DATA_MBPS,\"DeleteOnTermination\":true}}"
+  fi
   local server client
   server="$(launch server "$SERVER_TYPE" 30 "$data_disk")"; save_state SERVER_ID "$server"
   client="$(launch client "$CLIENT_TYPE" 60)";              save_state CLIENT_ID "$client"

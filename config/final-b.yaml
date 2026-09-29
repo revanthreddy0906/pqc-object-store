@@ -1,0 +1,27 @@
+# Final batch B: object-size sweep up to 500 MiB (SoT §9.2 Sweeps B and C corners).
+# Large objects use a minimum operation count so every run has enough samples.
+experiment_id: final-b
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 5
+duration_s: 20
+min_measured_ops: 10     # at least 10 measured operations per run, whatever the size
+settle_max_s: 30
+get_objects: 8           # 8 x 500 MiB fixtures per GET cell
+pool_bytes: 67108864
+seed: 20261002
+blocks:
+  - sizes: [1024, 65536, 1048576, 16777216, 134217728, 524288000]
+    concurrency: [1]
+    operations: [put, get]
+    modes: [B0, B1, R1, B2, P1]
+  - sizes: [134217728]    # corners: many large objects in flight
+    concurrency: [32]
+    operations: [put, get]
+    modes: [B1, R1, P1]
+  - sizes: [524288000]
+    concurrency: [16]
+    operations: [put, get]
+    modes: [B1, R1, P1]

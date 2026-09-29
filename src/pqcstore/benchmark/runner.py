@@ -406,6 +406,9 @@ class ExperimentConfig:
     seed: int = 1
     max_processes: int | None = None
     min_free_bytes: int = 5 * 2**30  # disk guard for client and server (checked per run)
+    # After each run, wait (up to this long) until MinIO stops writing to disk, so that purging
+    # the previous run's deleted objects does not overlap the next run (pilot finding).
+    settle_max_s: float = 0.0
     server_metrics_url: str | None = "http://127.0.0.1:9000/minio/v2/metrics/node"
     raw: dict = field(default_factory=dict)
 
@@ -508,6 +511,7 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
 
     envelope.warm_up()
     public, private = generate_recipient()  # untimed; RSA-4096 generation is slow
+    ensure_bucket(config.bucket)  # a fresh or instance-store server starts empty
     commit = _git_commit()
     machine_id = hashlib.sha256(socket.gethostname().encode()).hexdigest()[:12]
     blocks = config.cells()
@@ -558,10 +562,12 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
                         delete_objects(config.bucket, get_objects)
                     except Exception:  # noqa: BLE001, S110 - reported later by `pqcstore gc`
                         pass
+                settled = settle(config.server_metrics_url, config.settle_max_s)
                 outcomes.append(outcome)
                 manifest["runs"].append({**asdict(outcome), "cell": asdict(cell),
                                          "started_unix": started,
-                                         "seconds": round(time.time() - started, 2)})
+                                         "seconds": round(time.time() - started, 2),
+                                         "settle_s": settled})
                 save_manifest()
                 progress(f"[{len(outcomes)}/{total}] {run_id}: {outcome.records} requests, "
                          f"{outcome.failures} failed{'' if outcome.valid else ' INVALID'}"
@@ -577,6 +583,54 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
         compress_raw(run_dir)
     write_checksums(run_dir)
     return run_dir, outcomes
+
+
+def ensure_bucket(bucket: str) -> None:
+    from pqcstore.settings import Settings
+    from pqcstore.storage.minio_store import MinioStore
+
+    MinioStore(Settings.from_env()).ensure_bucket(bucket)
+
+
+def settle(metrics_url: str | None, max_s: float, quiet_bytes_per_s: float = 5 * 2**20,
+           quiet_seconds: int = 2) -> float:
+    """Wait until MinIO's disk writes stay below `quiet_bytes_per_s` for `quiet_seconds`
+    consecutive seconds (or `max_s` passes). Returns the seconds waited."""
+    if not metrics_url or max_s <= 0:
+        return 0.0
+    from pqcstore.benchmark.samplers import scrape_minio
+
+    start = time.monotonic()
+    quiet, last = 0, None
+    while time.monotonic() - start < max_s:
+        try:
+            written = scrape_minio(metrics_url).get("io_write_bytes")
+        except OSError:
+            written = None
+        if written is None:  # metric unavailable: fall back to a short fixed pause
+            time.sleep(min(5.0, max_s))
+            break
+        if last is not None:
+            quiet = quiet + 1 if written - last < quiet_bytes_per_s else 0
+            if quiet >= quiet_seconds:
+                break
+        last = written
+        time.sleep(1.0)
+    return round(time.monotonic() - start, 1)
+
+
+def plan_experiment(config_path: Path, hourly_usd: float, overhead_s: float = 5.0,
+                    settle_s: float = 3.0) -> dict:
+    """Runs, time and cost of an experiment before launching it. Overhead per run (setup,
+    fixtures, cleanup) is calibrated on the pilot: 45 s wall time per 40 s timed run."""
+    config = ExperimentConfig.load(config_path)
+    cells = sum(len(block) for block in config.cells())
+    runs = cells * config.repetitions
+    per_run = config.warmup_s + config.duration_s + overhead_s + \
+        (settle_s if config.settle_max_s > 0 else 0.0)
+    hours = runs * per_run / 3600
+    return {"cells": cells, "runs": runs, "seconds_per_run": per_run, "hours": round(hours, 1),
+            "usd": round(hours * hourly_usd, 1)}
 
 
 def disk_guard(run_dir: Path, metrics_url: str | None, min_free: int) -> str | None:
