@@ -1,10 +1,10 @@
 """The whole pipeline (config -> worker processes -> records -> samplers -> validation) on MinIO."""
 
-import json
 
 import pytest
 import yaml
 
+from pqcstore.benchmark.records import iter_records
 from pqcstore.benchmark.runner import run_experiment
 from pqcstore.benchmark.validate import validate
 
@@ -36,7 +36,7 @@ def test_tiny_experiment_end_to_end(store, settings, tmp_path):
     assert not any("exceed" in v for v in report.timer_violations)  # no double counting
     assert report.sessions_checked > 0 and not report.session_violations
 
-    records = [json.loads(line) for line in (run_dir / "requests.jsonl").open()]
+    records = list(iter_records(run_dir))  # raw records are zstd-compressed at the end
     closed = [r for r in records if r["loop_type"] == "closed" and r["mode"] != "N1"]
     assert {r["mode"] for r in closed} == {"B0", "R1", "P1"}
     n1_puts = [r for r in records if r["mode"] == "N1" and r["operation"] == "put"
