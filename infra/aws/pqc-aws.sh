@@ -28,8 +28,15 @@ TAGS="{Key=Project,Value=$PROJECT_TAG}"
 die() { echo "error: $*" >&2; exit 1; }
 load_state() { [[ -f "$STATE" ]] || die "no testbed yet; run: $0 up"; source "$STATE"; }
 save_state() { while (($#)); do printf '%s=%q\n' "$1" "$2" >> "$STATE"; shift 2; done; }
-public_ip() { "${AWS[@]}" ec2 describe-instances --instance-ids "$1" \
-  --query 'Reservations[0].Instances[0].PublicIpAddress'; }
+public_ip() {
+  local ip; ip="$("${AWS[@]}" ec2 describe-instances --instance-ids "$1" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress')"
+  if [[ -z "$ip" || "$ip" == None ]]; then
+    local role=client; [[ "$1" == "${SERVER_ID:-}" ]] && role=server
+    die "the $role VM is not running (it stops itself when idle or after a run); run: $0 start"
+  fi
+  echo "$ip"
+}
 remote() { local host=$1; shift; ssh "${SSH_OPTS[@]}" "ubuntu@$host" "$@"; }
 
 ubuntu_ami() {
@@ -168,6 +175,9 @@ cmd_update() {  # push committed code only; keeps builds, .env and experiments o
     remote "$host" "tar -xzf pqc.tar.gz -C pqc && rm pqc.tar.gz && echo $commit > pqc/GIT_COMMIT"
   done
   rm -f "$bundle"
+  # Re-install the idle auto-stop so watchdog fixes reach VMs provisioned earlier.
+  remote "$(public_ip "$SERVER_ID")" "cd pqc && bash scripts/setup_vm.sh watchdog server"
+  remote "$(public_ip "$CLIENT_ID")" "cd pqc && bash scripts/setup_vm.sh watchdog client"
   echo "Updated both VMs to $(git -C "$REPO" rev-parse --short HEAD)"
 }
 

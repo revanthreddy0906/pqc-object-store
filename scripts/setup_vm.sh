@@ -7,6 +7,7 @@
 #   setup_vm.sh fio                 disk baseline on the server's MinIO data disk
 #   setup_vm.sh baseline SERVER_IP  network baseline from the client
 #   setup_vm.sh run CONFIG SERVER_IP  run an experiment, validate it, then stop this VM
+#   setup_vm.sh watchdog server|client  (re)install the idle auto-stop
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROLE=${1:?role}
@@ -84,14 +85,20 @@ install_idle_watchdog() {
 # Stops this VM when nothing has happened for 60 minutes (role: $role).
 state=/var/lib/pqc-idle; mkdir -p \$state
 now=\$(date +%s)
+busy=0
 if [[ "$role" == server ]]; then
-  marker=\$(curl -fsS http://127.0.0.1:9000/minio/v2/metrics/node 2>/dev/null \
-    | awk '/^minio_process_network_receive_bytes_total/{print \$2}')
+  # Real benchmark traffic moves far more than the ~KB this check itself adds to the counter
+  # (the metrics request is itself network traffic, so "any change" never looks idle).
+  bytes=\$(curl -fsS http://127.0.0.1:9000/minio/v2/metrics/node 2>/dev/null \
+    | awk '/^minio_process_network_receive_bytes_total/{printf "%d", \$2}')
+  last=\$(cat \$state/bytes 2>/dev/null || echo 0)
+  echo "\${bytes:-0}" > \$state/bytes
+  (( \${bytes:-0} - last > 10 * 1024 * 1024 )) && busy=1
 else
-  marker=\$(pgrep -f "pqcstore.cli bench" >/dev/null && date +%s || echo idle)
+  pgrep -f "pqcstore.cli bench" >/dev/null && busy=1
 fi
-if [[ "\$marker" != "\$(cat \$state/marker 2>/dev/null)" ]]; then
-  echo "\$marker" > \$state/marker; echo "\$now" > \$state/changed
+if (( busy )) || [[ ! -f \$state/changed ]]; then
+  echo "\$now" > \$state/changed
 fi
 changed=\$(cat \$state/changed 2>/dev/null || echo "\$now")
 up=\$(cut -d. -f1 /proc/uptime)
@@ -194,6 +201,7 @@ run_experiment() {
 }
 
 case "$ROLE" in
+  watchdog) install_idle_watchdog "${2:?server|client}" ;;
   server) setup_server ;;
   client) setup_client ;;
   fio) run_fio ;;
