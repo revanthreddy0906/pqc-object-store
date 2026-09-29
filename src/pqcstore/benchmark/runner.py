@@ -37,6 +37,7 @@ from typing import Any
 import psutil
 import yaml
 
+from pqcstore.benchmark.records import RAW, compress_raw, sha256_file
 from pqcstore.crypto.modes import MODES, RecipientPrivate, RecipientPublic, generate_recipient
 
 STAGE_FIELDS = ("ke_ns", "kdf_ns", "aead_ns", "ser_ns", "s3_ns", "total_ns")
@@ -571,6 +572,9 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
         progress(f"STOPPED EARLY: {stopped}")
     manifest["finished_utc"] = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     save_manifest()
+    if (run_dir / RAW).exists():
+        progress(f"compressing {RAW} ...")
+        compress_raw(run_dir)
     write_checksums(run_dir)
     return run_dir, outcomes
 
@@ -600,5 +604,5 @@ def disk_guard(run_dir: Path, metrics_url: str | None, min_free: int) -> str | N
 def write_checksums(run_dir: Path) -> None:
     lines = []
     for path in sorted(p for p in run_dir.iterdir() if p.is_file() and p.name != "checksums.sha256"):
-        lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+        lines.append(f"{sha256_file(path)}  {path.name}")  # streamed: files reach tens of GB
     (run_dir / "checksums.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")

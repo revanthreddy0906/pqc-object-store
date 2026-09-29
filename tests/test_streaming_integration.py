@@ -102,7 +102,7 @@ def test_cli_get_publishes_nothing_on_tamper(estore, store, settings, test_prefi
     assert not (tmp_path / "out.bin.partial").exists()
 
 
-def test_memory_growth_is_below_object_size(settings):
+def test_memory_growth_is_below_object_size(store, settings):  # `store` skips if MinIO is down
     """A 96 MiB round trip must not need anywhere near 96 MiB of extra memory."""
     result = run_isolated(96 * MIB, settings.bucket)
     assert result["match"]

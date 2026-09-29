@@ -11,13 +11,14 @@ scheduling noise, not a missing stage.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+from pqcstore.benchmark.records import iter_lines, sha256_file
 
 SCHEMA: dict[str, type | tuple[type, ...]] = {
     "experiment_id": str, "run_id": str, "block_id": str, "repetition": int, "request_id": str,
@@ -61,44 +62,44 @@ def validate(run_dir: Path) -> Report:
     report = Report()
     for line in (run_dir / "checksums.sha256").read_text().splitlines():
         digest, name = line.split("  ", 1)
-        if hashlib.sha256((run_dir / name).read_bytes()).hexdigest() != digest:
+        if not (run_dir / name).exists() or sha256_file(run_dir / name) != digest:
             report.checksum_errors.append(name)
     manifest = yaml.safe_load((run_dir / "run-manifest.yaml").read_text())
     report.invalid_runs = [run["run_id"] for run in manifest["runs"] if not run["valid"]]
 
     per_run: dict[str, list[tuple[float, int, int]]] = defaultdict(list)
     sessions: dict[tuple, list[tuple[int, int, int]]] = defaultdict(list)
-    with (run_dir / "requests.jsonl").open(encoding="utf-8") as handle:
-        for number, line in enumerate(handle, 1):
-            record = json.loads(line)
-            report.records += 1
-            problems = [name for name, kind in SCHEMA.items()
-                        if name not in record or not isinstance(record[name], kind)
-                        or (kind is int and isinstance(record[name], bool))]
-            if problems:
-                report.schema_error_count += 1
-                if len(report.schema_errors) < 20:
-                    report.schema_errors.append(f"line {number}: bad or missing {problems}")
-                continue
-            if not record["success"]:
-                report.failures[record["error_class"]] += 1
-                continue
-            if record.get("session_id") is not None:
-                sessions[(record["run_id"], record["worker_id"], record["session_id"])].append(
-                    (record["session_seq"], record["session_bound"], record["session_bmax"]))
-            report.measured += record["phase"] == "measure"
-            total = record["total_ns"]
-            other = total - sum(record[s] for s in STAGES)
-            if other < 0:
-                report.timer_violation_count += 1
-                if len(report.timer_violations) < 20:
-                    report.timer_violations.append(
-                        f"line {number} ({record['run_id']}): stages exceed total by {-other} ns")
-                continue
-            excess = max(0, other - OTHER_FLOOR_NS)
-            fraction = excess / total if total else 0.0
-            report.outlier_requests += fraction > RUN_P99_LIMIT
-            per_run[record["run_id"]].append((fraction, excess, total))
+    # Records are streamed: raw files reach tens of GB.
+    for number, line in enumerate(iter_lines(run_dir), 1):
+        record = json.loads(line)
+        report.records += 1
+        problems = [name for name, kind in SCHEMA.items()
+                    if name not in record or not isinstance(record[name], kind)
+                    or (kind is int and isinstance(record[name], bool))]
+        if problems:
+            report.schema_error_count += 1
+            if len(report.schema_errors) < 20:
+                report.schema_errors.append(f"line {number}: bad or missing {problems}")
+            continue
+        if not record["success"]:
+            report.failures[record["error_class"]] += 1
+            continue
+        if record.get("session_id") is not None:
+            sessions[(record["run_id"], record["worker_id"], record["session_id"])].append(
+                (record["session_seq"], record["session_bound"], record["session_bmax"]))
+        report.measured += record["phase"] == "measure"
+        total = record["total_ns"]
+        other = total - sum(record[s] for s in STAGES)
+        if other < 0:
+            report.timer_violation_count += 1
+            if len(report.timer_violations) < 20:
+                report.timer_violations.append(
+                    f"line {number} ({record['run_id']}): stages exceed total by {-other} ns")
+            continue
+        excess = max(0, other - OTHER_FLOOR_NS)
+        fraction = excess / total if total else 0.0
+        report.outlier_requests += fraction > RUN_P99_LIMIT
+        per_run[record["run_id"]].append((fraction, excess, total))
 
     # N1: the hard bounds, checked from the raw records (SoT Phase 7 exit criterion).
     for key, grants in sessions.items():

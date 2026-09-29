@@ -51,8 +51,10 @@ plt.rcParams.update({
 # ------------------------------------------------------------------ loading
 
 def load_records(run_dir: Path) -> list[dict]:
-    with (run_dir / "requests.jsonl").open(encoding="utf-8") as handle:
-        return [r for r in map(json.loads, handle) if r["success"] and r["phase"] == "measure"]
+    """Successful measured records (small experiments only: this keeps them all in memory)."""
+    from pqcstore.benchmark.records import iter_records
+
+    return [r for r in iter_records(run_dir) if r["success"] and r["phase"] == "measure"]
 
 
 def load_samples(path: Path) -> dict[str, list[dict]]:
