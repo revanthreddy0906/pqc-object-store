@@ -32,3 +32,4 @@ paper/*.out
 
 # AWS testbed state (instance ids, IPs)
 infra/aws/state.env
+experiments/*.log
