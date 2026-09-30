@@ -1,6 +1,8 @@
 # Final batch C: bounded session amortization (Sweep E) and open-loop load for the queueing
-# model (Sweep D). The open-loop rates are PROVISIONAL: set them from batch A's measured
-# capacity (about 0.3x ... 1.1x of the saturation throughput) before running this batch.
+# model (Sweep D). Rates set from batch A (20260929T172801Z): 64 KiB PUT saturates at about
+# 4,450 req/s in every mode (c128-c500), so its grid spans about 0.35x ... 1.35x of that.
+# 1 KiB capacity was not measured above 1 worker, so its grid reaches further (8,000 req/s);
+# the 1 KiB cells of Sweep E (closed loop, c128) measure that capacity in this same batch.
 experiment_id: final-c
 bucket: pqc-bench
 chunk_size: 4194304
@@ -22,7 +24,7 @@ blocks:
     queue_aware: [false]
   - loop: open                        # queue-aware vs fixed bound at equal offered load
     sizes: [1024]
-    rates: [1000, 3000, 6000]
+    rates: [1500, 3500, 4500, 6000]     # light to overloaded (64 KiB saturates at ~4,450)
     threads: 128
     operations: [put]
     modes: [P1, N1]
@@ -31,8 +33,14 @@ blocks:
     session_tmax_s: 60
     queue_aware: [false, true]
   - loop: open                        # Sweep D: offered load around saturation (queueing model)
-    sizes: [1024, 65536]
-    rates: [500, 1000, 2000, 4000, 6000, 8000]
+    sizes: [65536]
+    rates: [1500, 2500, 3500, 4000, 4500, 5000, 6000]
+    threads: 256
+    operations: [put]
+    modes: [B1, P1]
+  - loop: open
+    sizes: [1024]
+    rates: [1500, 3000, 4000, 4500, 5000, 6000, 8000]
     threads: 256
     operations: [put]
     modes: [B1, P1]
