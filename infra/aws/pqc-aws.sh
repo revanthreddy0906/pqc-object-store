@@ -87,6 +87,8 @@ cmd_up() {
       --tag-specifications "ResourceType=key-pair,Tags=[$TAGS]" \
       --query KeyMaterial > "$KEY_FILE"
     chmod 600 "$KEY_FILE"
+    # ssh offers a neighbouring .pub instead of the key's own public half; a stale one locks us out
+    ssh-keygen -y -f "$KEY_FILE" > "$KEY_FILE.pub"
     save_state CREATED_KEY 1
   fi
 
@@ -240,7 +242,7 @@ cmd_destroy() {
   [[ -n "${PG_NAME:-}" ]] && "${AWS[@]}" ec2 delete-placement-group --group-name "$PG_NAME"
   "${AWS[@]}" ec2 delete-security-group --group-id "$SG_ID"
   if [[ -n "${CREATED_KEY:-}" ]]; then
-    "${AWS[@]}" ec2 delete-key-pair --key-name "$KEY_NAME"; rm -f "$KEY_FILE"
+    "${AWS[@]}" ec2 delete-key-pair --key-name "$KEY_NAME"; rm -f "$KEY_FILE" "$KEY_FILE.pub"
   fi
   rm -f "$STATE"
   echo "Everything created by this script is gone."
