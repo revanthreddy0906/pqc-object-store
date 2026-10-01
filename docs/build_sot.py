@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.5 · 29 Sep 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.6 · 1 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.5 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.6 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -329,6 +329,21 @@ T([["Version", "Date", "Change", "Status"],
                           "1 KiB-500 MiB at 1 worker plus corners, N1 and open-loop batches; about "
                           "15 h and $35 (config/final-a|b|c.yaml, `pqcstore plan`) (§9.2, §9.4); "
                           "(5) raw records are compressed with zstd at the end of each experiment.",
+    "Pending team review (§1.3)"],
+   ["1.6", "1 Oct 2026", "Final runs and analysis method: (1) batches A/B/C ran on AWS (1,710 runs, "
+                         "83.3M measured requests, 0 failures, all VALID); (2) 95% intervals are "
+                         "Student-t over the 5 repetitions instead of a bootstrap, which under-covers "
+                         "at n = 5; (3) modes are compared only within one batch, paired by "
+                         "repetition (absolute small-PUT throughput moved ~10% between batches); "
+                         "(4) equivalence margin +-5% with three verdicts (equivalent, different, "
+                         "inconclusive); (5) 43 of 342 cells exceed the 5% CV rule of §9.3, 38 of them "
+                         "small-object PUTs disturbed by mode-independent server stalls; they are "
+                         "reported as flagged, with a stall-excluded sensitivity check, instead of "
+                         "re-run (extra repetitions from a new session cannot be pooled); (6) stage "
+                         "times include GIL waiting above one worker, so handshake cost and stage "
+                         "shares are reported at one worker and CPU per request is thread CPU time; "
+                         "(7) memory is peak RSS and growth over the whole run (allocation happens in "
+                         "warm-up), CPU over the measured window only.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1092,7 +1107,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.5",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.6",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])
