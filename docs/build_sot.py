@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.6 · 1 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.7 · 1 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.6 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.7 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -344,6 +344,16 @@ T([["Version", "Date", "Change", "Status"],
                          "shares are reported at one worker and CPU per request is thread CPU time; "
                          "(7) memory is peak RSS and growth over the whole run (allocation happens in "
                          "warm-up), CPU over the measured window only.",
+    "Pending team review (§1.3)"],
+   ["1.7", "1 Oct 2026", "Correction to v1.5 and v1.6: the adaptive pause after each run never "
+                         "engaged. MinIO in Docker does not export its disk-write counter, so every "
+                         "run of batches A-C paused a fixed 5 s. A PUT run following another PUT run "
+                         "was then sometimes slowed 20-40% by the previous run's writeback and object "
+                         "purge (17 runs flagged; run order is shuffled per repetition, so this adds "
+                         "noise, not bias). Without the metric the runner now pauses for the full "
+                         "settle_max_s. Batch D (config/final-d.yaml: 52 small-object PUT cells, "
+                         "260 runs, 40 s pause, about 5 h and $12) re-measures the noisy cells; "
+                         "its cells are compared only with each other.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1107,7 +1117,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.6",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.7",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

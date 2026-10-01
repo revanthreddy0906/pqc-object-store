@@ -1,0 +1,36 @@
+# Final batch D: re-run of the noisy small-object PUT cells (SoT v1.7).
+# In batches A-C the pause between runs fell back to 5 s (MinIO in Docker does not export disk
+# writes), and a PUT run that followed another PUT run was sometimes slowed by the previous
+# run's writeback and object purge (38 small-PUT cells over the 5% CV limit). Here every run
+# is followed by the full 40 s pause: kernel dirty-page writeback (30 s) plus MinIO's delete
+# cleanup interval (5 s), with margin. Cells are compared only within this batch.
+experiment_id: final-d
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+repetitions: 5
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40
+get_objects: 32
+pool_bytes: 67108864
+seed: 20261004
+blocks:
+  - sizes: [65536]                    # H1 and baselines at saturation (batch A, 64 KiB PUT)
+    concurrency: [256, 500]
+    operations: [put]
+    modes: [B0, B1, R1, B2, P1]
+  - sizes: [65536]                    # 64 KiB PUT below and at the knee, with N1 (batches A, C)
+    concurrency: [1, 32, 128]
+    operations: [put]
+    modes: [B0, B1, R1, B2, P1, N1]
+    session_bmax: [10, 100, 1000]
+    session_tmax_s: 60
+    queue_aware: [false]
+  - sizes: [1024]                     # 1 KiB PUT with X25519 for H1, and N1 (batches B, C)
+    concurrency: [1, 32, 128]
+    operations: [put]
+    modes: [B1, B2, P1, N1]
+    session_bmax: [10, 100, 1000]
+    session_tmax_s: 60
+    queue_aware: [false]

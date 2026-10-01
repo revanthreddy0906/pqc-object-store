@@ -407,7 +407,9 @@ class ExperimentConfig:
     max_processes: int | None = None
     min_free_bytes: int = 5 * 2**30  # disk guard for client and server (checked per run)
     # After each run, wait (up to this long) until MinIO stops writing to disk, so that purging
-    # the previous run's deleted objects does not overlap the next run (pilot finding).
+    # the previous run's deleted objects does not overlap the next run (pilot finding). MinIO in
+    # Docker does not export disk writes, and then the whole pause is taken: it must cover the
+    # kernel's dirty-page writeback (30 s) plus MinIO's delete cleanup interval (5 s).
     settle_max_s: float = 0.0
     server_metrics_url: str | None = "http://127.0.0.1:9000/minio/v2/metrics/node"
     raw: dict = field(default_factory=dict)
@@ -595,7 +597,9 @@ def ensure_bucket(bucket: str) -> None:
 def settle(metrics_url: str | None, max_s: float, quiet_bytes_per_s: float = 5 * 2**20,
            quiet_seconds: int = 2) -> float:
     """Wait until MinIO's disk writes stay below `quiet_bytes_per_s` for `quiet_seconds`
-    consecutive seconds (or `max_s` passes). Returns the seconds waited."""
+    consecutive seconds (or `max_s` passes). Without the disk-write metric, pause for the
+    full `max_s`: a short pause let the previous run's writeback stall the next run
+    (batches A-C, SoT v1.7). Returns the seconds waited."""
     if not metrics_url or max_s <= 0:
         return 0.0
     from pqcstore.benchmark.samplers import scrape_minio
@@ -607,8 +611,8 @@ def settle(metrics_url: str | None, max_s: float, quiet_bytes_per_s: float = 5 *
             written = scrape_minio(metrics_url).get("io_write_bytes")
         except OSError:
             written = None
-        if written is None:  # metric unavailable: fall back to a short fixed pause
-            time.sleep(min(5.0, max_s))
+        if written is None:  # metric unavailable: fixed pause of the full length
+            time.sleep(max(0.0, max_s - (time.monotonic() - start)))
             break
         if last is not None:
             quiet = quiet + 1 if written - last < quiet_bytes_per_s else 0
@@ -620,12 +624,14 @@ def settle(metrics_url: str | None, max_s: float, quiet_bytes_per_s: float = 5 *
 
 
 def plan_experiment(config_path: Path, hourly_usd: float, overhead_s: float = 5.0,
-                    settle_s: float = 3.0) -> dict:
+                    settle_s: float | None = None) -> dict:
     """Runs, time and cost of an experiment before launching it. Overhead per run (setup,
     fixtures, cleanup) is calibrated on the pilot: 45 s wall time per 40 s timed run."""
     config = ExperimentConfig.load(config_path)
     cells = sum(len(block) for block in config.cells())
     runs = cells * config.repetitions
+    if settle_s is None:  # MinIO without the disk-write metric pauses for the full length
+        settle_s = config.settle_max_s
     per_run = config.warmup_s + config.duration_s + overhead_s + \
         (settle_s if config.settle_max_s > 0 else 0.0)
     hours = runs * per_run / 3600

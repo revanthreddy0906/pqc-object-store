@@ -144,8 +144,9 @@ def test_settle_disabled_or_metric_missing(monkeypatch):
     monkeypatch.setattr(samplers, "scrape_minio", lambda url: {})
     slept = []
     monkeypatch.setattr(runner.time, "sleep", slept.append)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 100.0)
     runner.settle("http://x", max_s=30)
-    assert slept == [5.0]
+    assert slept == [30.0]  # no disk-write metric: the whole pause is taken
 
 
 def test_plan_counts_runs_and_cost(tmp_path):
@@ -158,5 +159,7 @@ def test_plan_counts_runs_and_cost(tmp_path):
         "blocks": [{"sizes": [1024, 2048], "concurrency": [1, 8], "operations": ["put"],
                     "modes": ["B1", "P1"]}]}))
     p = plan_experiment(path, hourly_usd=2.0)
-    assert p["cells"] == 8 and p["runs"] == 40 and p["seconds_per_run"] == 33
-    assert p["hours"] == round(40 * 33 / 3600, 1) and p["usd"] == round(40 * 33 / 3600 * 2.0, 1)
+    # 5 warm-up + 20 measured + 5 overhead + the full 30 s pause (no disk-write metric)
+    assert p["cells"] == 8 and p["runs"] == 40 and p["seconds_per_run"] == 60
+    assert p["hours"] == round(40 * 60 / 3600, 1) and p["usd"] == round(40 * 60 / 3600 * 2.0, 1)
+    assert plan_experiment(path, hourly_usd=2.0, settle_s=3)["seconds_per_run"] == 33
