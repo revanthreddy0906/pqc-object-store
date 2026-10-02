@@ -1,23 +1,23 @@
 # Final results (batches A, B, C)
 
-1710 runs, 83,318,994 measured requests, 0 failed requests. Link capacity (iperf3) 1,479 MiB/s. 95% CIs are Student-t over 5 repetitions; mode ratios are paired by repetition within one batch.
+1970 runs, 101,330,560 measured requests, 0 failed requests. Link capacity (iperf3) 1,479 MiB/s. 95% CIs are Student-t over 5 repetitions; mode ratios are paired by repetition within one batch.
 
-Run-to-run noise: 43 of 342 cells exceed 5% throughput CV (38 of them small-object PUT cells). 17 runs are flagged as server stalls (server CPU and throughput both well below their own cell's median); by mode: B0 0, B1 3, R1 2, B2 0, P1 3, P2 0, N1 9.
+Run-to-run noise: 51 of 394 cells exceed 5% throughput CV (46 of them small-object PUT cells). 20 runs are flagged as server stalls (server CPU and throughput both well below their own cell's median); by mode: B0 0, B1 3, R1 3, B2 0, P1 3, P2 0, N1 11.
 
 ## Metric 1 — key-establishment (handshake) time per request, one worker
 
-Batch B, closed loop, 1 worker; per repetition averaged over the six object sizes.
+Batch B, closed loop, 1 worker; per repetition averaged over the object sizes up to 16 MiB (multipart uploads above that add thread contention to the timer).
 
 | Mode | Op | Key establishment (µs), mean [95% CI] |
 |---|---|---|
-| B1 AES only (pre-shared key) | put | 1.6 [1.6, 1.7] |
+| B1 AES only (pre-shared key) | put | 1.3 [1.3, 1.3] |
 | B1 AES only (pre-shared key) | get | 1.1 [1.1, 1.2] |
-| R1 RSA-OAEP-4096 | put | 108.1 [107.3, 109.0] |
-| R1 RSA-OAEP-4096 | get | 1493.9 [1491.2, 1496.6] |
-| B2 X25519 | put | 100.8 [100.1, 101.5] |
-| B2 X25519 | get | 49.0 [48.5, 49.6] |
-| P1 ML-KEM-768 | put | 58.0 [56.7, 59.3] |
-| P1 ML-KEM-768 | get | 46.5 [45.9, 47.1] |
+| R1 RSA-OAEP-4096 | put | 94.2 [94.0, 94.5] |
+| R1 RSA-OAEP-4096 | get | 1485.9 [1483.9, 1487.9] |
+| B2 X25519 | put | 86.7 [85.9, 87.5] |
+| B2 X25519 | get | 49.0 [48.7, 49.2] |
+| P1 ML-KEM-768 | put | 45.3 [44.7, 45.9] |
+| P1 ML-KEM-768 | get | 46.5 [46.0, 47.0] |
 
 ## Metric 2 — throughput (batch A, closed loop)
 
@@ -60,7 +60,7 @@ Requests/s, mean ± 95% CI half-width; MiB/s in parentheses; limiting resource f
 |---|---|---|---|---|---|---|---|
 | 1 | 459 ±12 (29) | 456 ±21 (29) | 261 ±4 (16) | 454 ±14 (28) | 449 ±19 (28) | – | none (latency-bound) |
 | 8 | 3,513 ±48 (220) | 3,417 ±55 (214) | 1,974 ±15 (123) | 3,381 ±20 (211) | 3,344 ±41 (209) | – | none (latency-bound) |
-| 32 | 9,995 ±152 (625) | 9,394 ±118 (587) | 3,597 ±4 (225) | 9,053 ±117 (566) | 8,978 ±93 (561) | – | server write path |
+| 32 | 9,995 ±152 (625) | 9,394 ±118 (587) | 3,597 ±4 (225) | 9,053 ±117 (566) | 8,978 ±93 (561) | – | unattributed |
 | 128 | 10,386 ±344 (649) | 9,639 ±134 (602) | 3,577 ±4 (224) | 9,345 ±127 (584) | 9,446 ±132 (590) | – | client CPU |
 | 256 | 9,270 ±74 (579) | 8,599 ±88 (537) | 3,466 ±7 (217) | 8,253 ±95 (516) | 8,010 ±136 (501) | – | client CPU |
 | 500 | 9,248 ±35 (578) | 8,564 ±34 (535) | 3,400 ±32 (213) | 8,265 ±32 (517) | 7,946 ±26 (497) | – | client CPU |
@@ -188,17 +188,17 @@ Paired ratio P1/B2 [95% CI] and verdict (equivalent = CI inside ±5%).
 | final-a | get | 1 MiB | 256 | 0.999 [0.997, 1.001] equivalent | 1.001 [0.989, 1.013] equivalent | equivalent |
 | final-a | get | 1 MiB | 32 | 0.999 [0.994, 1.004] equivalent | 1.068 [0.998, 1.143] inconclusive | equivalent |
 | final-a | get | 1 MiB | 500 | 0.987 [0.967, 1.007] equivalent | 1.004 [0.995, 1.013] equivalent | equivalent |
-| final-a | get | 1 MiB | 8 | 0.998 [0.997, 0.999] equivalent | 0.993 [0.974, 1.013] equivalent | equivalent |
+| final-a | get | 1 MiB | 8 | 0.998 [0.997, 0.999] equivalent (CI excludes 1) | 0.993 [0.974, 1.013] equivalent | equivalent (CI excludes 1) |
 | final-a | get | 16 MiB | 1 | 0.981 [0.935, 1.029] inconclusive | 1.026 [0.982, 1.072] inconclusive | inconclusive |
 | final-a | get | 16 MiB | 128 | 1.001 [0.999, 1.003] equivalent | 1.034 [0.950, 1.127] inconclusive | equivalent |
-| final-a | get | 16 MiB | 32 | 0.999 [0.997, 1.000] equivalent | 1.071 [1.013, 1.132] inconclusive | equivalent |
-| final-a | get | 16 MiB | 8 | 1.000 [0.999, 1.001] equivalent | 1.139 [1.038, 1.249] inconclusive | equivalent |
+| final-a | get | 16 MiB | 32 | 0.999 [0.997, 1.000] equivalent | 1.071 [1.013, 1.132] inconclusive (CI excludes 1) | equivalent |
+| final-a | get | 16 MiB | 8 | 1.000 [0.999, 1.001] equivalent | 1.139 [1.038, 1.249] inconclusive (CI excludes 1) | equivalent |
 | final-a | get | 64 KiB | 1 | 0.990 [0.957, 1.024] equivalent | 1.015 [0.992, 1.038] equivalent | equivalent |
 | final-a | get | 64 KiB | 128 | 1.011 [0.993, 1.029] equivalent | 0.988 [0.963, 1.013] equivalent | equivalent |
-| final-a | get | 64 KiB | 256 | 0.971 [0.962, 0.980] equivalent | 1.040 [1.029, 1.050] equivalent | equivalent |
-| final-a | get | 64 KiB | 32 | 0.992 [0.987, 0.997] equivalent | 1.013 [1.009, 1.017] equivalent | equivalent |
-| final-a | get | 64 KiB | 500 | 0.961 [0.959, 0.964] equivalent | 1.049 [1.047, 1.051] inconclusive | equivalent |
-| final-a | get | 64 KiB | 8 | 0.989 [0.980, 0.998] equivalent | 1.011 [1.002, 1.021] equivalent | equivalent |
+| final-a | get | 64 KiB | 256 | 0.971 [0.962, 0.980] equivalent (CI excludes 1) | 1.040 [1.029, 1.050] equivalent (CI excludes 1) | equivalent (CI excludes 1) |
+| final-a | get | 64 KiB | 32 | 0.992 [0.987, 0.997] equivalent (CI excludes 1) | 1.013 [1.009, 1.017] equivalent (CI excludes 1) | equivalent (CI excludes 1) |
+| final-a | get | 64 KiB | 500 | 0.961 [0.959, 0.964] equivalent (CI excludes 1) | 1.049 [1.047, 1.051] inconclusive (CI excludes 1) | equivalent (CI excludes 1) |
+| final-a | get | 64 KiB | 8 | 0.989 [0.980, 0.998] equivalent (CI excludes 1) | 1.011 [1.002, 1.021] equivalent (CI excludes 1) | equivalent (CI excludes 1) |
 | final-a | put | 1 MiB | 1 | 1.002 [0.992, 1.011] equivalent | 0.998 [0.989, 1.008] equivalent | equivalent |
 | final-a | put | 1 MiB | 128 | 0.999 [0.972, 1.026] equivalent | 1.004 [0.972, 1.036] equivalent | equivalent |
 | final-a | put | 1 MiB | 256 | 0.999 [0.979, 1.018] equivalent | 0.999 [0.976, 1.022] equivalent | equivalent |
@@ -206,7 +206,7 @@ Paired ratio P1/B2 [95% CI] and verdict (equivalent = CI inside ±5%).
 | final-a | put | 1 MiB | 500 | 1.005 [0.999, 1.011] equivalent | 0.998 [0.975, 1.022] equivalent | equivalent |
 | final-a | put | 1 MiB | 8 | 0.995 [0.976, 1.013] equivalent | 1.005 [0.988, 1.023] equivalent | equivalent |
 | final-a | put | 16 MiB | 1 | 0.992 [0.964, 1.022] equivalent | 1.010 [0.975, 1.045] equivalent | equivalent |
-| final-a | put | 16 MiB | 128 | 0.998 [0.996, 0.999] equivalent | 0.952 [0.929, 0.975] inconclusive | equivalent |
+| final-a | put | 16 MiB | 128 | 0.998 [0.996, 0.999] equivalent (CI excludes 1) | 0.952 [0.929, 0.975] inconclusive (CI excludes 1) | equivalent (CI excludes 1) |
 | final-a | put | 16 MiB | 32 | 0.995 [0.988, 1.003] equivalent | 1.010 [0.963, 1.061] inconclusive | equivalent |
 | final-a | put | 16 MiB | 8 | 0.990 [0.931, 1.054] inconclusive | 1.023 [0.896, 1.169] inconclusive | inconclusive |
 | final-a | put | 64 KiB | 1 | 1.006 [0.974, 1.038] equivalent | 0.991 [0.960, 1.023] equivalent | equivalent |
@@ -223,12 +223,20 @@ Paired ratio P1/B2 [95% CI] and verdict (equivalent = CI inside ±5%).
 | final-b | get | 64 KiB | 1 | 1.000 [0.961, 1.041] equivalent | 1.000 [0.971, 1.030] equivalent | equivalent |
 | final-b | put | 1 KiB | 1 | 1.014 [0.962, 1.070] inconclusive | 0.983 [0.925, 1.044] inconclusive | inconclusive |
 | final-b | put | 1 MiB | 1 | 1.005 [0.997, 1.013] equivalent | 0.993 [0.985, 1.001] equivalent | equivalent |
-| final-b | put | 128 MiB | 1 | 1.039 [1.034, 1.044] equivalent | 0.961 [0.956, 0.966] equivalent | equivalent |
+| final-b | put | 128 MiB | 1 | 1.039 [1.034, 1.044] equivalent (CI excludes 1) | 0.961 [0.956, 0.966] equivalent (CI excludes 1) | equivalent (CI excludes 1) |
 | final-b | put | 16 MiB | 1 | 1.000 [0.992, 1.008] equivalent | 1.000 [0.995, 1.005] equivalent | equivalent |
 | final-b | put | 500 MiB | 1 | 1.005 [0.997, 1.014] equivalent | 0.993 [0.981, 1.006] equivalent | equivalent |
 | final-b | put | 64 KiB | 1 | 1.033 [0.986, 1.083] inconclusive | 0.966 [0.921, 1.013] inconclusive | inconclusive |
+| final-d | put | 1 KiB | 1 | 0.992 [0.971, 1.014] equivalent | 1.008 [0.987, 1.029] equivalent | equivalent |
+| final-d | put | 1 KiB | 128 | 0.996 [0.952, 1.041] equivalent | 1.008 [0.995, 1.022] equivalent | equivalent |
+| final-d | put | 1 KiB | 32 | 1.049 [0.967, 1.137] inconclusive | 0.956 [0.883, 1.035] inconclusive | inconclusive |
+| final-d | put | 64 KiB | 1 | 1.060 [1.022, 1.100] inconclusive (CI excludes 1) | 0.940 [0.906, 0.976] inconclusive (CI excludes 1) | inconclusive (CI excludes 1) |
+| final-d | put | 64 KiB | 128 | 0.999 [0.993, 1.006] equivalent | 1.005 [0.999, 1.011] equivalent | equivalent |
+| final-d | put | 64 KiB | 256 | 0.989 [0.972, 1.007] equivalent | 1.006 [0.990, 1.022] equivalent | equivalent |
+| final-d | put | 64 KiB | 32 | 1.019 [0.975, 1.064] inconclusive | 0.986 [0.950, 1.023] inconclusive | inconclusive |
+| final-d | put | 64 KiB | 500 | 0.998 [0.991, 1.005] equivalent | 1.005 [1.002, 1.009] equivalent (CI excludes 1) | equivalent |
 
-Throughput verdicts: equivalent 35, inconclusive 9
+Throughput verdicts: equivalent 33, equivalent (CI excludes 1) 7, inconclusive 11, inconclusive (CI excludes 1) 1
 
 ## H2 — share of request time spent in ML-KEM (P1, one worker, batch B)
 
@@ -262,7 +270,7 @@ Paired ratio R1/P1 [95% CI].
 | final-a | 16 MiB | 1 | 0.966 [0.926, 1.008] inconclusive | 1.049 [0.994, 1.108] inconclusive |
 | final-a | 16 MiB | 128 | 1.001 [0.998, 1.003] equivalent | 1.009 [0.961, 1.059] inconclusive |
 | final-a | 16 MiB | 32 | 1.000 [0.999, 1.001] equivalent | 0.994 [0.954, 1.034] equivalent |
-| final-a | 16 MiB | 8 | 0.999 [0.999, 1.000] equivalent | 0.932 [0.887, 0.980] inconclusive |
+| final-a | 16 MiB | 8 | 0.999 [0.999, 1.000] equivalent | 0.932 [0.887, 0.980] inconclusive (CI excludes 1) |
 | final-a | 64 KiB | 1 | 0.580 [0.557, 0.605] different | 1.696 [1.643, 1.750] different |
 | final-a | 64 KiB | 128 | 0.379 [0.373, 0.384] different | 2.627 [2.569, 2.685] different |
 | final-a | 64 KiB | 256 | 0.433 [0.425, 0.441] different | 2.250 [2.217, 2.283] different |
@@ -273,7 +281,7 @@ Paired ratio R1/P1 [95% CI].
 | final-b | 1 MiB | 1 | 0.740 [0.716, 0.765] different | 1.341 [1.311, 1.371] different |
 | final-b | 128 MiB | 1 | 1.062 [0.960, 1.175] inconclusive | 0.945 [0.844, 1.057] inconclusive |
 | final-b | 128 MiB | 32 | 1.005 [0.989, 1.022] equivalent | 0.980 [0.834, 1.150] inconclusive |
-| final-b | 16 MiB | 1 | 0.935 [0.908, 0.963] inconclusive | 1.080 [1.044, 1.117] inconclusive |
+| final-b | 16 MiB | 1 | 0.935 [0.908, 0.963] inconclusive (CI excludes 1) | 1.080 [1.044, 1.117] inconclusive (CI excludes 1) |
 | final-b | 500 MiB | 1 | 0.918 [0.835, 1.009] inconclusive | 1.077 [0.972, 1.193] inconclusive |
 | final-b | 500 MiB | 16 | 0.987 [0.959, 1.016] equivalent | 1.109 [0.904, 1.359] inconclusive |
 | final-b | 64 KiB | 1 | 0.573 [0.552, 0.595] different | 1.731 [1.673, 1.792] different |
@@ -342,13 +350,18 @@ Thread CPU time (excludes GIL waiting), one worker.
 | final-c | get | 64 KiB | P1-B1 | +0.042 [+0.028, +0.055] |
 | final-c | put | 1 KiB | P1-B1 | +0.062 [+0.020, +0.103] |
 | final-c | put | 64 KiB | P1-B1 | +0.040 [+0.014, +0.066] |
+| final-d | put | 1 KiB | P1-B1 | +0.052 [+0.033, +0.071] |
+| final-d | put | 1 KiB | P1-B2 | -0.020 [-0.034, -0.006] |
+| final-d | put | 64 KiB | P1-B1 | +0.030 [+0.020, +0.040] |
+| final-d | put | 64 KiB | P1-B2 | -0.061 [-0.069, -0.054] |
+| final-d | put | 64 KiB | P1-R1 | -0.036 [-0.052, -0.019] |
 
 ## Hybrid P2 vs P1 (batch A, 1 MiB)
 
 | Op | Workers | Throughput ratio P2/P1 | p50 ratio |
 |---|---|---|---|
-| get | 1 | 0.988 [0.981, 0.995] equivalent | 1.013 [1.000, 1.026] equivalent |
-| get | 128 | 0.999 [0.995, 1.002] equivalent | 0.980 [0.961, 1.000] equivalent |
+| get | 1 | 0.988 [0.981, 0.995] equivalent (CI excludes 1) | 1.013 [1.000, 1.026] equivalent (CI excludes 1) |
+| get | 128 | 0.999 [0.995, 1.002] equivalent | 0.980 [0.961, 1.000] equivalent (CI excludes 1) |
 | get | 32 | 0.999 [0.992, 1.006] equivalent | 0.988 [0.888, 1.100] inconclusive |
 | get | 500 | 1.024 [0.977, 1.072] inconclusive | 0.999 [0.994, 1.005] equivalent |
 | get | 8 | 1.000 [0.999, 1.002] equivalent | 1.007 [0.997, 1.018] equivalent |
@@ -356,50 +369,68 @@ Thread CPU time (excludes GIL waiting), one worker.
 | put | 128 | 1.008 [0.990, 1.026] equivalent | 0.993 [0.974, 1.012] equivalent |
 | put | 32 | 1.014 [1.000, 1.029] equivalent | 0.990 [0.978, 1.002] equivalent |
 | put | 500 | 1.001 [0.976, 1.026] equivalent | 0.985 [0.959, 1.012] equivalent |
-| put | 8 | 0.967 [0.963, 0.972] equivalent | 1.036 [1.029, 1.042] equivalent |
+| put | 8 | 0.967 [0.963, 0.972] equivalent (CI excludes 1) | 1.036 [1.029, 1.042] equivalent (CI excludes 1) |
 
-## N1 — bounded ML-KEM session amortisation (batch C, Sweep E)
+## N1 — bounded ML-KEM session amortisation (batch C Sweep E; batch D re-run of PUT)
 
 ML-KEM operations per request, key-establishment time, and throughput/CPU paired against P1 in the same batch.
 
-| Op | Size | Workers | B_max | KEM/request | KE µs N1 vs P1 | Throughput N1/P1 | Δ CPU ms/request |
-|---|---|---|---|---|---|---|---|
-| put | 1 KiB | 1 | 10 | 0.1000 | 10.6 vs 44.3 | 0.978 [0.926, 1.033] inconclusive | -0.022 [-0.050, +0.006] |
-| put | 1 KiB | 1 | 100 | 0.0100 | 6.2 vs 44.3 | 0.842 [0.653, 1.084] inconclusive | -0.017 [-0.040, +0.006] |
-| put | 1 KiB | 1 | 1000 | 0.0009 | 5.6 vs 44.3 | 0.885 [0.656, 1.193] inconclusive | -0.019 [-0.059, +0.021] |
-| put | 1 KiB | 32 | 10 | 0.1000 | 21.9 vs 130.8 | 0.984 [0.779, 1.243] inconclusive | -0.045 [-0.087, -0.003] |
-| put | 1 KiB | 32 | 100 | 0.0100 | 8.1 vs 130.8 | 0.876 [0.768, 1.000] inconclusive | -0.072 [-0.095, -0.048] |
-| put | 1 KiB | 32 | 1000 | 0.0010 | 6.9 vs 130.8 | 0.957 [0.915, 1.001] inconclusive | -0.055 [-0.063, -0.046] |
-| put | 1 KiB | 128 | 10 | 0.1000 | 40.4 vs 312.9 | 0.889 [0.685, 1.154] inconclusive | -0.092 [-0.191, +0.007] |
-| put | 1 KiB | 128 | 100 | 0.0100 | 10.8 vs 312.9 | 0.953 [0.814, 1.115] inconclusive | -0.085 [-0.142, -0.028] |
-| put | 1 KiB | 128 | 1000 | 0.0010 | 7.3 vs 312.9 | 0.966 [0.740, 1.262] inconclusive | -0.079 [-0.170, +0.011] |
-| put | 64 KiB | 1 | 10 | 0.0999 | 10.8 vs 44.6 | 0.978 [0.921, 1.038] inconclusive | -0.014 [-0.058, +0.030] |
-| put | 64 KiB | 1 | 100 | 0.0100 | 6.1 vs 44.6 | 0.983 [0.961, 1.005] equivalent | -0.032 [-0.049, -0.016] |
-| put | 64 KiB | 1 | 1000 | 0.0009 | 5.6 vs 44.6 | 0.981 [0.946, 1.016] inconclusive | -0.018 [-0.042, +0.005] |
-| put | 64 KiB | 32 | 10 | 0.1000 | 21.0 vs 124.5 | 0.955 [0.895, 1.018] inconclusive | -0.050 [-0.063, -0.037] |
-| put | 64 KiB | 32 | 100 | 0.0100 | 8.4 vs 124.5 | 0.932 [0.825, 1.051] inconclusive | -0.067 [-0.090, -0.043] |
-| put | 64 KiB | 32 | 1000 | 0.0009 | 7.0 vs 124.5 | 0.993 [0.887, 1.113] inconclusive | -0.051 [-0.070, -0.032] |
-| put | 64 KiB | 128 | 10 | 0.1000 | 47.8 vs 273.6 | 1.025 [0.816, 1.289] inconclusive | -0.050 [-0.146, +0.045] |
-| put | 64 KiB | 128 | 100 | 0.0100 | 11.7 vs 273.6 | 1.012 [0.848, 1.208] inconclusive | -0.055 [-0.140, +0.030] |
-| put | 64 KiB | 128 | 1000 | 0.0010 | 7.3 vs 273.6 | 0.974 [0.879, 1.081] inconclusive | -0.071 [-0.117, -0.025] |
-| get | 1 KiB | 1 | 10 | – | 9.6 vs 46.4 | 1.025 [0.968, 1.085] inconclusive | -0.053 [-0.080, -0.026] |
-| get | 1 KiB | 1 | 100 | – | 5.4 vs 46.4 | 1.013 [0.966, 1.062] inconclusive | -0.054 [-0.080, -0.029] |
-| get | 1 KiB | 1 | 1000 | – | 4.9 vs 46.4 | 1.013 [0.963, 1.065] inconclusive | -0.066 [-0.083, -0.049] |
-| get | 1 KiB | 32 | 10 | – | 25.5 vs 185.7 | 1.037 [1.034, 1.040] equivalent | -0.063 [-0.066, -0.060] |
-| get | 1 KiB | 32 | 100 | – | 8.1 vs 185.7 | 1.042 [1.041, 1.044] equivalent | -0.070 [-0.072, -0.068] |
-| get | 1 KiB | 32 | 1000 | – | 6.2 vs 185.7 | 1.042 [1.039, 1.045] equivalent | -0.070 [-0.073, -0.067] |
-| get | 1 KiB | 128 | 10 | – | 241.5 vs 1651.8 | 1.044 [1.041, 1.048] equivalent | -0.071 [-0.074, -0.067] |
-| get | 1 KiB | 128 | 100 | – | 39.1 vs 1651.8 | 1.051 [1.048, 1.054] inconclusive | -0.081 [-0.083, -0.079] |
-| get | 1 KiB | 128 | 1000 | – | 9.6 vs 1651.8 | 1.049 [1.047, 1.050] inconclusive | -0.080 [-0.082, -0.078] |
-| get | 64 KiB | 1 | 10 | – | 9.7 vs 46.6 | 1.014 [0.961, 1.070] inconclusive | -0.031 [-0.039, -0.023] |
-| get | 64 KiB | 1 | 100 | – | 5.3 vs 46.6 | 0.998 [0.935, 1.065] inconclusive | -0.030 [-0.052, -0.008] |
-| get | 64 KiB | 1 | 1000 | – | 4.9 vs 46.6 | 0.978 [0.930, 1.028] inconclusive | -0.041 [-0.055, -0.027] |
-| get | 64 KiB | 32 | 10 | – | 24.4 vs 168.6 | 1.033 [1.028, 1.038] equivalent | -0.061 [-0.063, -0.059] |
-| get | 64 KiB | 32 | 100 | – | 8.1 vs 168.6 | 1.037 [1.034, 1.040] equivalent | -0.067 [-0.068, -0.065] |
-| get | 64 KiB | 32 | 1000 | – | 6.4 vs 168.6 | 1.036 [1.031, 1.040] equivalent | -0.068 [-0.069, -0.066] |
-| get | 64 KiB | 128 | 10 | – | 231.0 vs 1545.4 | 1.012 [0.999, 1.026] equivalent | -0.043 [-0.058, -0.029] |
-| get | 64 KiB | 128 | 100 | – | 40.1 vs 1545.4 | 1.014 [1.005, 1.022] equivalent | -0.049 [-0.060, -0.038] |
-| get | 64 KiB | 128 | 1000 | – | 9.7 vs 1545.4 | 1.021 [1.004, 1.037] equivalent | -0.058 [-0.077, -0.039] |
+| Batch | Op | Size | Workers | B_max | KEM/request | KE µs N1 vs P1 | Throughput N1/P1 | Δ CPU ms/request |
+|---|---|---|---|---|---|---|---|---|
+| C | put | 1 KiB | 1 | 10 | 0.1000 | 10.6 vs 44.3 | 0.978 [0.926, 1.033] inconclusive | -0.022 [-0.050, +0.006] |
+| C | put | 1 KiB | 1 | 100 | 0.0100 | 6.2 vs 44.3 | 0.842 [0.653, 1.084] inconclusive | -0.017 [-0.040, +0.006] |
+| C | put | 1 KiB | 1 | 1000 | 0.0009 | 5.6 vs 44.3 | 0.885 [0.656, 1.193] inconclusive | -0.019 [-0.059, +0.021] |
+| C | put | 1 KiB | 32 | 10 | 0.1000 | 21.9 vs 130.8 | 0.984 [0.779, 1.243] inconclusive | -0.045 [-0.087, -0.003] |
+| C | put | 1 KiB | 32 | 100 | 0.0100 | 8.1 vs 130.8 | 0.876 [0.768, 1.000] inconclusive (CI excludes 1) | -0.072 [-0.095, -0.048] |
+| C | put | 1 KiB | 32 | 1000 | 0.0010 | 6.9 vs 130.8 | 0.957 [0.915, 1.001] inconclusive | -0.055 [-0.063, -0.046] |
+| C | put | 1 KiB | 128 | 10 | 0.1000 | 40.4 vs 312.9 | 0.889 [0.685, 1.154] inconclusive | -0.092 [-0.191, +0.007] |
+| C | put | 1 KiB | 128 | 100 | 0.0100 | 10.8 vs 312.9 | 0.953 [0.814, 1.115] inconclusive | -0.085 [-0.142, -0.028] |
+| C | put | 1 KiB | 128 | 1000 | 0.0010 | 7.3 vs 312.9 | 0.966 [0.740, 1.262] inconclusive | -0.079 [-0.170, +0.011] |
+| C | put | 64 KiB | 1 | 10 | 0.0999 | 10.8 vs 44.6 | 0.978 [0.921, 1.038] inconclusive | -0.014 [-0.058, +0.030] |
+| C | put | 64 KiB | 1 | 100 | 0.0100 | 6.1 vs 44.6 | 0.983 [0.961, 1.005] equivalent | -0.032 [-0.049, -0.016] |
+| C | put | 64 KiB | 1 | 1000 | 0.0009 | 5.6 vs 44.6 | 0.981 [0.946, 1.016] inconclusive | -0.018 [-0.042, +0.005] |
+| C | put | 64 KiB | 32 | 10 | 0.1000 | 21.0 vs 124.5 | 0.955 [0.895, 1.018] inconclusive | -0.050 [-0.063, -0.037] |
+| C | put | 64 KiB | 32 | 100 | 0.0100 | 8.4 vs 124.5 | 0.932 [0.825, 1.051] inconclusive | -0.067 [-0.090, -0.043] |
+| C | put | 64 KiB | 32 | 1000 | 0.0009 | 7.0 vs 124.5 | 0.993 [0.887, 1.113] inconclusive | -0.051 [-0.070, -0.032] |
+| C | put | 64 KiB | 128 | 10 | 0.1000 | 47.8 vs 273.6 | 1.025 [0.816, 1.289] inconclusive | -0.050 [-0.146, +0.045] |
+| C | put | 64 KiB | 128 | 100 | 0.0100 | 11.7 vs 273.6 | 1.012 [0.848, 1.208] inconclusive | -0.055 [-0.140, +0.030] |
+| C | put | 64 KiB | 128 | 1000 | 0.0010 | 7.3 vs 273.6 | 0.974 [0.879, 1.081] inconclusive | -0.071 [-0.117, -0.025] |
+| C | get | 1 KiB | 1 | 10 | – | 9.6 vs 46.4 | 1.025 [0.968, 1.085] inconclusive | -0.053 [-0.080, -0.026] |
+| C | get | 1 KiB | 1 | 100 | – | 5.4 vs 46.4 | 1.013 [0.966, 1.062] inconclusive | -0.054 [-0.080, -0.029] |
+| C | get | 1 KiB | 1 | 1000 | – | 4.9 vs 46.4 | 1.013 [0.963, 1.065] inconclusive | -0.066 [-0.083, -0.049] |
+| C | get | 1 KiB | 32 | 10 | – | 25.5 vs 185.7 | 1.037 [1.034, 1.040] equivalent (CI excludes 1) | -0.063 [-0.066, -0.060] |
+| C | get | 1 KiB | 32 | 100 | – | 8.1 vs 185.7 | 1.042 [1.041, 1.044] equivalent (CI excludes 1) | -0.070 [-0.072, -0.068] |
+| C | get | 1 KiB | 32 | 1000 | – | 6.2 vs 185.7 | 1.042 [1.039, 1.045] equivalent (CI excludes 1) | -0.070 [-0.073, -0.067] |
+| C | get | 1 KiB | 128 | 10 | – | 241.5 vs 1651.8 | 1.044 [1.041, 1.048] equivalent (CI excludes 1) | -0.071 [-0.074, -0.067] |
+| C | get | 1 KiB | 128 | 100 | – | 39.1 vs 1651.8 | 1.051 [1.048, 1.054] inconclusive (CI excludes 1) | -0.081 [-0.083, -0.079] |
+| C | get | 1 KiB | 128 | 1000 | – | 9.6 vs 1651.8 | 1.049 [1.047, 1.050] inconclusive (CI excludes 1) | -0.080 [-0.082, -0.078] |
+| C | get | 64 KiB | 1 | 10 | – | 9.7 vs 46.6 | 1.014 [0.961, 1.070] inconclusive | -0.031 [-0.039, -0.023] |
+| C | get | 64 KiB | 1 | 100 | – | 5.3 vs 46.6 | 0.998 [0.935, 1.065] inconclusive | -0.030 [-0.052, -0.008] |
+| C | get | 64 KiB | 1 | 1000 | – | 4.9 vs 46.6 | 0.978 [0.930, 1.028] inconclusive | -0.041 [-0.055, -0.027] |
+| C | get | 64 KiB | 32 | 10 | – | 24.4 vs 168.6 | 1.033 [1.028, 1.038] equivalent (CI excludes 1) | -0.061 [-0.063, -0.059] |
+| C | get | 64 KiB | 32 | 100 | – | 8.1 vs 168.6 | 1.037 [1.034, 1.040] equivalent (CI excludes 1) | -0.067 [-0.068, -0.065] |
+| C | get | 64 KiB | 32 | 1000 | – | 6.4 vs 168.6 | 1.036 [1.031, 1.040] equivalent (CI excludes 1) | -0.068 [-0.069, -0.066] |
+| C | get | 64 KiB | 128 | 10 | – | 231.0 vs 1545.4 | 1.012 [0.999, 1.026] equivalent | -0.043 [-0.058, -0.029] |
+| C | get | 64 KiB | 128 | 100 | – | 40.1 vs 1545.4 | 1.014 [1.005, 1.022] equivalent (CI excludes 1) | -0.049 [-0.060, -0.038] |
+| C | get | 64 KiB | 128 | 1000 | – | 9.7 vs 1545.4 | 1.021 [1.004, 1.037] equivalent (CI excludes 1) | -0.058 [-0.077, -0.039] |
+| D | put | 1 KiB | 1 | 10 | 0.1000 | 10.6 vs 44.8 | 1.043 [1.020, 1.066] inconclusive (CI excludes 1) | -0.036 [-0.054, -0.018] |
+| D | put | 1 KiB | 1 | 100 | 0.0100 | 6.1 vs 44.8 | 1.037 [0.997, 1.078] inconclusive | -0.041 [-0.052, -0.030] |
+| D | put | 1 KiB | 1 | 1000 | 0.0010 | 5.5 vs 44.8 | 1.005 [0.948, 1.065] inconclusive | -0.042 [-0.060, -0.023] |
+| D | put | 1 KiB | 32 | 10 | 0.1000 | 22.8 vs 134.1 | 1.004 [0.960, 1.051] inconclusive | -0.039 [-0.053, -0.026] |
+| D | put | 1 KiB | 32 | 100 | 0.0100 | 8.3 vs 134.1 | 0.975 [0.937, 1.015] inconclusive | -0.054 [-0.067, -0.040] |
+| D | put | 1 KiB | 32 | 1000 | 0.0010 | 6.8 vs 134.1 | 0.947 [0.885, 1.014] inconclusive | -0.059 [-0.077, -0.042] |
+| D | put | 1 KiB | 128 | 10 | 0.1000 | 63.2 vs 353.1 | 1.013 [0.970, 1.058] inconclusive | -0.053 [-0.068, -0.039] |
+| D | put | 1 KiB | 128 | 100 | 0.0100 | 11.9 vs 353.1 | 0.952 [0.843, 1.076] inconclusive | -0.087 [-0.135, -0.039] |
+| D | put | 1 KiB | 128 | 1000 | 0.0010 | 7.2 vs 353.1 | 0.919 [0.821, 1.030] inconclusive | -0.100 [-0.147, -0.054] |
+| D | put | 64 KiB | 1 | 10 | 0.1000 | 10.4 vs 44.0 | 0.994 [0.934, 1.058] inconclusive | -0.024 [-0.045, -0.004] |
+| D | put | 64 KiB | 1 | 100 | 0.0100 | 6.1 vs 44.0 | 1.003 [0.965, 1.043] equivalent | -0.035 [-0.047, -0.023] |
+| D | put | 64 KiB | 1 | 1000 | 0.0009 | 5.4 vs 44.0 | 1.005 [0.959, 1.053] inconclusive | -0.036 [-0.055, -0.016] |
+| D | put | 64 KiB | 32 | 10 | 0.1000 | 21.9 vs 128.2 | 0.991 [0.976, 1.006] equivalent | -0.045 [-0.052, -0.037] |
+| D | put | 64 KiB | 32 | 100 | 0.0100 | 8.7 vs 128.2 | 0.995 [0.977, 1.013] equivalent | -0.052 [-0.057, -0.046] |
+| D | put | 64 KiB | 32 | 1000 | 0.0010 | 7.0 vs 128.2 | 0.987 [0.960, 1.015] equivalent | -0.054 [-0.063, -0.045] |
+| D | put | 64 KiB | 128 | 10 | 0.1000 | 52.9 vs 317.9 | 0.971 [0.929, 1.015] inconclusive | -0.066 [-0.082, -0.050] |
+| D | put | 64 KiB | 128 | 100 | 0.0100 | 12.4 vs 317.9 | 0.994 [0.980, 1.008] equivalent | -0.066 [-0.073, -0.059] |
+| D | put | 64 KiB | 128 | 1000 | 0.0010 | 7.4 vs 317.9 | 0.989 [0.970, 1.007] equivalent | -0.070 [-0.081, -0.058] |
 
 ### Queue-aware vs fixed bound (open loop, 1 KiB PUT, 128 threads, B_max = 100)
 
@@ -412,36 +443,36 @@ ML-KEM operations per request, key-establishment time, and throughput/CPU paired
 
 ## RQ3 — offered load vs response time and the M/M/c model (batch C, Sweep D)
 
-Capacity µ from the two most overloaded rates; c = round(µ·S0). Response time = queue wait + service. Unstable runs (below 97% of offered or mean wait ≥ 10 ms) get no prediction.
+Capacity µ from the two most overloaded rates of the same batch; c = round(µ·S0); M/M/c is evaluated at every ρ < 1. Response time = queue wait + service. A run is stable when it delivers ≥ 97% of the offered rate with mean wait < 10 ms; unstable response times grow with run length, so they are shown only as a lower bound.
 
 | Size | Mode | Offered | ρ | Achieved | Stable runs | Mean response ms | M/M/c ms | p99 ms | c |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 KiB | B1 | 1,500 | 0.31 | 1,499 | 5/5 | 5.45 | 5.22 | 9.5 | 25 |
 | 1 KiB | B1 | 3,000 | 0.63 | 3,007 | 5/5 | 5.43 | 5.24 | 11.4 | 25 |
-| 1 KiB | B1 | 4,000 | 0.83 | 4,008 | 3/5 | – | – | – | 25 |
-| 1 KiB | B1 | 4,500 | 0.94 | 4,130 | 0/5 | – | – | – | 25 |
-| 1 KiB | B1 | 5,000 | 1.04 | 4,587 | 0/5 | – | – | – | 25 |
-| 1 KiB | B1 | 6,000 | 1.25 | 4,751 | 0/5 | – | – | – | 25 |
-| 1 KiB | B1 | 8,000 | 1.67 | 4,832 | 0/5 | – | – | – | 25 |
+| 1 KiB | B1 | 4,000 | 0.83 | 4,008 | 3/5 | ≥ 53 (unstable) | 5.60 | – | 25 |
+| 1 KiB | B1 | 4,500 | 0.94 | 4,130 | 0/5 | ≥ 1,218 (unstable) | 7.61 | – | 25 |
+| 1 KiB | B1 | 5,000 | 1.04 | 4,587 | 0/5 | ≥ 1,777 (unstable) | ∞ | – | 25 |
+| 1 KiB | B1 | 6,000 | 1.25 | 4,751 | 0/5 | ≥ 3,639 (unstable) | ∞ | – | 25 |
+| 1 KiB | B1 | 8,000 | 1.67 | 4,832 | 0/5 | ≥ 9,441 (unstable) | ∞ | – | 25 |
 | 1 KiB | P1 | 1,500 | 0.31 | 1,506 | 5/5 | 5.46 | 5.24 | 9.6 | 25 |
 | 1 KiB | P1 | 3,000 | 0.62 | 3,001 | 5/5 | 5.62 | 5.25 | 11.9 | 25 |
-| 1 KiB | P1 | 4,000 | 0.83 | 4,001 | 0/5 | – | – | – | 25 |
-| 1 KiB | P1 | 4,500 | 0.93 | 4,141 | 0/5 | – | – | – | 25 |
-| 1 KiB | P1 | 5,000 | 1.03 | 4,397 | 0/5 | – | – | – | 25 |
-| 1 KiB | P1 | 6,000 | 1.24 | 4,857 | 0/5 | – | – | – | 25 |
-| 1 KiB | P1 | 8,000 | 1.65 | 4,814 | 0/5 | – | – | – | 25 |
+| 1 KiB | P1 | 4,000 | 0.83 | 4,001 | 0/5 | ≥ 140 (unstable) | 5.63 | – | 25 |
+| 1 KiB | P1 | 4,500 | 0.93 | 4,141 | 0/5 | ≥ 1,335 (unstable) | 7.76 | – | 25 |
+| 1 KiB | P1 | 5,000 | 1.03 | 4,397 | 0/5 | ≥ 2,405 (unstable) | ∞ | – | 25 |
+| 1 KiB | P1 | 6,000 | 1.24 | 4,857 | 0/5 | ≥ 3,165 (unstable) | ∞ | – | 25 |
+| 1 KiB | P1 | 8,000 | 1.65 | 4,814 | 0/5 | ≥ 9,881 (unstable) | ∞ | – | 25 |
 | 64 KiB | B1 | 1,500 | 0.35 | 1,499 | 5/5 | 5.86 | 5.64 | 9.8 | 24 |
 | 64 KiB | B1 | 2,500 | 0.58 | 2,500 | 5/5 | 5.66 | 5.64 | 10.6 | 24 |
-| 64 KiB | B1 | 3,500 | 0.81 | 3,500 | 0/5 | – | – | – | 24 |
-| 64 KiB | B1 | 4,000 | 0.93 | 3,921 | 0/5 | – | – | – | 24 |
-| 64 KiB | B1 | 4,500 | 1.04 | 4,459 | 0/5 | – | – | – | 24 |
-| 64 KiB | B1 | 5,000 | 1.16 | 4,378 | 0/5 | – | – | – | 24 |
-| 64 KiB | B1 | 6,000 | 1.39 | 4,269 | 0/5 | – | – | – | 24 |
+| 64 KiB | B1 | 3,500 | 0.81 | 3,500 | 0/5 | ≥ 86 (unstable) | 5.99 | – | 24 |
+| 64 KiB | B1 | 4,000 | 0.93 | 3,921 | 0/5 | ≥ 529 (unstable) | 8.31 | – | 24 |
+| 64 KiB | B1 | 4,500 | 1.04 | 4,459 | 0/5 | ≥ 363 (unstable) | ∞ | – | 24 |
+| 64 KiB | B1 | 5,000 | 1.16 | 4,378 | 0/5 | ≥ 1,887 (unstable) | ∞ | – | 24 |
+| 64 KiB | B1 | 6,000 | 1.39 | 4,269 | 0/5 | ≥ 6,813 (unstable) | ∞ | – | 24 |
 | 64 KiB | P1 | 1,500 | 0.35 | 1,502 | 5/5 | 5.40 | 5.18 | 8.8 | 22 |
 | 64 KiB | P1 | 2,500 | 0.58 | 2,505 | 5/5 | 5.73 | 5.18 | 10.9 | 22 |
-| 64 KiB | P1 | 3,500 | 0.81 | 3,505 | 3/5 | – | – | – | 22 |
-| 64 KiB | P1 | 4,000 | 0.92 | 3,829 | 0/5 | – | – | – | 22 |
-| 64 KiB | P1 | 4,500 | 1.04 | 4,443 | 0/5 | – | – | – | 22 |
-| 64 KiB | P1 | 5,000 | 1.15 | 4,318 | 0/5 | – | – | – | 22 |
-| 64 KiB | P1 | 6,000 | 1.38 | 4,347 | 0/5 | – | – | – | 22 |
+| 64 KiB | P1 | 3,500 | 0.81 | 3,505 | 3/5 | ≥ 64 (unstable) | 5.56 | – | 22 |
+| 64 KiB | P1 | 4,000 | 0.92 | 3,829 | 0/5 | ≥ 728 (unstable) | 7.98 | – | 22 |
+| 64 KiB | P1 | 4,500 | 1.04 | 4,443 | 0/5 | ≥ 348 (unstable) | ∞ | – | 22 |
+| 64 KiB | P1 | 5,000 | 1.15 | 4,318 | 0/5 | ≥ 2,443 (unstable) | ∞ | – | 22 |
+| 64 KiB | P1 | 6,000 | 1.38 | 4,347 | 0/5 | ≥ 5,718 (unstable) | ∞ | – | 22 |
 

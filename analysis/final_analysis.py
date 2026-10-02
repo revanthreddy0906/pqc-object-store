@@ -160,11 +160,12 @@ def paired_diff(a: list[dict], b: list[dict], metric: str):
 def verdict(lo: float, hi: float) -> str:
     if math.isnan(lo) or math.isnan(hi):
         return "n/a"
+    excludes_one = " (CI excludes 1)" if lo > 1 or hi < 1 else ""
     if lo >= 1 - MARGIN and hi <= 1 + MARGIN:
-        return "equivalent"
+        return "equivalent" + excludes_one
     if hi < 1 - MARGIN or lo > 1 + MARGIN:
         return "different"
-    return "inconclusive"
+    return "inconclusive" + excludes_one
 
 
 def compare(table: dict, mode_a: str, mode_b: str, metrics: list[str], where) -> list[dict]:
@@ -197,8 +198,12 @@ def closed(cell: dict) -> bool:
 
 def bottleneck(cell: dict, link_mib_s: float, cores: int = 16) -> str:
     """Name the resource that limits a closed-loop cell (i4i.4xlarge + c7i.4xlarge, 16 vCPU each)."""
-    net = statistics.fmean(max(r.get("client_net_tx_mib_s", 0) or 0,
-                               r.get("client_net_rx_mib_s", 0) or 0) for r in cell["runs"])
+    def rate(r: dict, key: str) -> float:
+        value = r.get(key, 0.0)
+        return 0.0 if value is None or math.isnan(value) else value
+
+    net = statistics.fmean(max(rate(r, "client_net_tx_mib_s"), rate(r, "client_net_rx_mib_s"))
+                           for r in cell["runs"])
     if net >= 0.85 * link_mib_s:
         return "network"
     if cell["client_host_cores"] >= 0.85 * cores:
@@ -227,8 +232,8 @@ def limit_label(cell: dict, link_mib_s: float) -> str:
     resource = bottleneck(cell, link_mib_s)
     if resource != "none (latency-bound)":
         return resource
-    if cell.get("saturated"):
-        return "server write path"  # flat throughput, no client/network/CPU cap reached
+    if cell.get("saturated"):  # flat throughput, but no client/network/CPU cap reached
+        return "server write path" if cell["operation"] == "put" else "unattributed"
     return resource
 
 
@@ -276,11 +281,12 @@ def queueing(table: dict) -> list[dict]:
                 "achieved": cell["ops_per_s"], "stable_runs": len(stable_runs),
                 "reps": len(cell["runs"]), "stable": stable,
                 "measured_mean_ms": cell["sojourn_mean_ms"] if stable else float("nan"),
+                "measured_mean_all_ms": cell["sojourn_mean_ms"],
                 "measured_mean_lo": cell["sojourn_mean_ms_lo"] if stable else float("nan"),
                 "measured_mean_hi": cell["sojourn_mean_ms_hi"] if stable else float("nan"),
                 "measured_p99_ms": cell["sojourn_p99_ms"] if stable else float("nan"),
                 "service_p50_ms": cell["p50_ms"],
-                "predicted_mean_ms": predicted if stable else float("nan"),
+                "predicted_mean_ms": predicted,
             })
     return rows
 
@@ -396,8 +402,8 @@ def build_report(table, runs, h1, h3, h4, hybrid, q_rows, link_mib_s) -> str:
 
     # Metric 1: handshake overhead at one worker (batch B, pooled over sizes per repetition).
     out += ["## Metric 1 — key-establishment (handshake) time per request, one worker", "",
-            ("Batch B, closed loop, 1 worker; per repetition averaged over the six object "
-             "sizes."),
+            ("Batch B, closed loop, 1 worker; per repetition averaged over the object sizes "
+             "up to 16 MiB (multipart uploads above that add thread contention to the timer)."),
             ""]
     rows = []
     for mode in ["B1", "R1", "B2", "P1"]:
@@ -405,7 +411,7 @@ def build_report(table, runs, h1, h3, h4, hybrid, q_rows, link_mib_s) -> str:
             per_rep = defaultdict(list)
             for r in runs:
                 if (r["experiment"] == "final-b" and r["mode"] == mode and r["operation"] == op
-                        and r["concurrency"] == 1):
+                        and r["concurrency"] == 1 and r["size"] <= 16 * MIB):
                     per_rep[r["repetition"]].append(r["ke_mean_ms"])
             mean, lo, hi = mean_ci([statistics.fmean(v) for v in per_rep.values()])
             rows.append([f"{mode} {MODE_NAME[mode]}", op,
@@ -514,28 +520,27 @@ def build_report(table, runs, h1, h3, h4, hybrid, q_rows, link_mib_s) -> str:
     out += [md_table(["Op", "Workers", "Throughput ratio P2/P1", "p50 ratio"], rows), ""]
 
     # N1.
-    out += ["## N1 — bounded ML-KEM session amortisation (batch C, Sweep E)", "",
+    out += ["## N1 — bounded ML-KEM session amortisation (batch C Sweep E; batch D re-run of PUT)", "",
             ("ML-KEM operations per request, key-establishment time, and throughput/CPU "
              "paired against P1 in the same batch."), ""]
     rows = []
-    for op in ("put", "get"):
-        for size in (1024, 65536):
-            for conc in (1, 32, 128):
-                p1 = table.get(("final-c", op, size, "closed", conc, 0.0, "P1", 0, False))
+    for exp, op, size, conc in [(e, o, s, c) for e in ("final-c", "final-d") for o in ("put", "get")
+                                for s in (1024, 65536) for c in (1, 32, 128)]:
+                p1 = table.get((exp, op, size, "closed", conc, 0.0, "P1", 0, False))
                 if not p1:
                     continue
                 for bmax in (10, 100, 1000):
-                    n1 = table.get(("final-c", op, size, "closed", conc, 0.0, "N1", bmax, False))
+                    n1 = table.get((exp, op, size, "closed", conc, 0.0, "N1", bmax, False))
                     if not n1:
                         continue
                     ratio, lo, hi, _ = paired(n1["runs"], p1["runs"], "ops_per_s")
                     d, dlo, dhi, _ = paired_diff(n1["runs"], p1["runs"], "cpu_ms_per_req")
-                    rows.append([op, size_label(size), str(conc), str(bmax),
+                    rows.append([exp[-1].upper(), op, size_label(size), str(conc), str(bmax),
                                  fmt(n1["kem_per_request"], 4) if op == "put" else "–",
                                  f"{n1['ke_mean_ms'] * 1000:.1f} vs {p1['ke_mean_ms'] * 1000:.1f}",
                                  f"{ratio:.3f} [{lo:.3f}, {hi:.3f}] {verdict(lo, hi)}",
                                  f"{d:+.3f} [{dlo:+.3f}, {dhi:+.3f}]"])
-    out += [md_table(["Op", "Size", "Workers", "B_max", "KEM/request", "KE µs N1 vs P1",
+    out += [md_table(["Batch", "Op", "Size", "Workers", "B_max", "KEM/request", "KE µs N1 vs P1",
                       "Throughput N1/P1", "Δ CPU ms/request"], rows), ""]
 
     out += ["### Queue-aware vs fixed bound (open loop, 1 KiB PUT, 128 threads, B_max = 100)", ""]
@@ -559,12 +564,15 @@ def build_report(table, runs, h1, h3, h4, hybrid, q_rows, link_mib_s) -> str:
 
     # Queueing.
     out += ["## RQ3 — offered load vs response time and the M/M/c model (batch C, Sweep D)", "",
-            ("Capacity µ from the two most overloaded rates; c = round(µ·S0). Response "
-             "time = queue wait + service. Unstable runs (below 97% of offered or mean wait "
-             "≥ 10 ms) get no prediction."), ""]
+            ("Capacity µ from the two most overloaded rates of the same batch; c = round(µ·S0); "
+             "M/M/c is evaluated at every ρ < 1. Response time = queue wait + service. A run is "
+             "stable when it delivers ≥ 97% of the offered rate with mean wait < 10 ms; unstable "
+             "response times grow with run length, so they are shown only as a lower bound."), ""]
     rows = [[size_label(q["size"]), q["mode"], f"{q['rate']:,.0f}", f"{q['rho']:.2f}",
              f"{q['achieved']:,.0f}", f"{q['stable_runs']}/{q['reps']}",
-             fmt(q["measured_mean_ms"], 2), fmt(q["predicted_mean_ms"], 2),
+             (fmt(q["measured_mean_ms"], 2) if q["stable"]
+              else f"≥ {fmt(q['measured_mean_all_ms'], 0)} (unstable)"),
+             fmt(q["predicted_mean_ms"], 2) if q["rho"] < 1 else "∞",
              fmt(q["measured_p99_ms"], 1), f"{q['servers']}"] for q in q_rows]
     out += [md_table(["Size", "Mode", "Offered", "ρ", "Achieved", "Stable runs",
                       "Mean response ms", "M/M/c ms", "p99 ms", "c"], rows), ""]
