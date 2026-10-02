@@ -1,0 +1,7 @@
+mode,object_size_bytes,metadata_bytes,overhead_bytes,source
+B0,1024,522,522,final-b
+B1,1024,576,592,final-b
+R1,1024,1276,1292,final-b
+B2,1024,622,638,final-b
+P1,1024,2034,2050,final-b
+P2,1048576,2091,2107,final-a

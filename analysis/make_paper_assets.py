@@ -1,15 +1,18 @@
-"""Generate every figure, table and quoted number of the paper from raw experiment files.
+"""Generate every figure, table and quoted number of the paper from the final results.
 
-No number in the paper is typed by hand (SoT §1.3): the paper \\input{}s the files
-this script writes to paper/generated/. Re-run it on new experiment directories and
-the paper updates.
+No number in the paper is typed by hand (SoT §1.3): paper/main.tex \\input{}s the files
+this script writes to paper/generated/. Inputs are the per-run summaries
+(analysis/summarize.py), the baselines, the experiment manifests and the per-mode
+manifest sizes (analysis/metadata_sizes.py).
 
-    python analysis/make_paper_assets.py \\
-        --experiment experiments/sample-paper/<stamp> \\
-        --n1 experiments/n1-dev/<stamp> \\
-        --micro experiments/microbench/<file>.json \\
-        --memory experiments/memory/<file>.json \\
-        --out paper/generated
+Which batch is authoritative for which result (SoT v1.7):
+  A  concurrency sweep: GET at every size, PUT at 1 MiB and 16 MiB
+  B  object-size sweep at one worker; handshake cost (objects up to 16 MiB)
+  C  open loop (queueing model), queue-aware N1, N1 on GET
+  D  re-run of small-object PUT (1 KiB, 64 KiB) with a working pause, including N1 PUT
+Ratios are computed only between modes of the same batch, paired by repetition.
+
+    python analysis/make_paper_assets.py --out paper/generated
 """
 
 from __future__ import annotations
@@ -18,103 +21,51 @@ import argparse
 import csv
 import json
 import math
+import re
 import statistics
-from collections import defaultdict
+import sys
 from pathlib import Path
 
 import matplotlib
+import yaml
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Validated categorical slots (dataviz reference palette, light mode, fixed order).
-SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
-INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
-MODES = ["B0", "B1", "R1", "B2", "P1", "P2"]
-MODE_NAME = {"B0": "B0 none", "B1": "B1 AES only", "R1": "R1 RSA-4096", "B2": "B2 X25519",
-             "P1": "P1 ML-KEM-768", "P2": "P2 hybrid"}
-STAGES = [("ke_ns", "Key establishment"), ("kdf_ns", "HKDF + key schedule"),
-          ("aead_ns", "AES-256-GCM"), ("ser_ns", "Manifest / metadata"),
-          ("s3_ns", "Storage + network")]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import final_analysis as fa
+
 MIB = 1024 * 1024
-SIZE_LABEL = {1024: "1 KiB", 65536: "64 KiB", 1048576: "1 MiB", 16777216: "16 MiB"}
+EXPERIMENTS = {"A": "final-a", "B": "final-b", "C": "final-c", "D": "final-d"}
+# Validated categorical slots (dataviz reference palette, light mode, fixed order).
+COLOR = {"B0": "#9a9893", "B1": "#2a78d6", "R1": "#eb6834", "B2": "#1baf7a", "P1": "#8b4fd6",
+         "P2": "#e87ba4", "N1": "#eda100"}
+MARKER = {"B0": "o", "B1": "s", "R1": "^", "B2": "D", "P1": "v", "P2": "P", "N1": "X"}
+LABEL = {"B0": "B0 plaintext", "B1": "B1 AES only", "R1": "R1 RSA-4096", "B2": "B2 X25519",
+         "P1": "P1 ML-KEM-768", "P2": "P2 hybrid", "N1": "N1 session"}
+INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 
 plt.rcParams.update({
-    "font.family": "serif", "font.size": 8, "axes.edgecolor": INK2, "axes.labelcolor": INK,
+    "font.family": "serif", "font.size": 7.5, "axes.edgecolor": INK2, "axes.labelcolor": INK,
     "xtick.color": INK2, "ytick.color": INK2, "axes.grid": True, "grid.color": GRID,
     "grid.linewidth": 0.6, "axes.axisbelow": True, "axes.spines.top": False,
     "axes.spines.right": False, "legend.frameon": False, "figure.dpi": 200,
-    "savefig.bbox": "tight", "lines.linewidth": 1.6,
+    "savefig.bbox": "tight", "lines.linewidth": 1.3, "lines.markersize": 3.5,
 })
 
 
-# ------------------------------------------------------------------ loading
+# ---------------------------------------------------------------- output helpers
 
-def load_records(run_dir: Path) -> list[dict]:
-    """Successful measured records (small experiments only: this keeps them all in memory)."""
-    from pqcstore.benchmark.records import iter_records
-
-    return [r for r in iter_records(run_dir) if r["success"] and r["phase"] == "measure"]
-
-
-def load_samples(path: Path) -> dict[str, list[dict]]:
-    rows = defaultdict(list)
-    if path.exists():
-        for row in csv.DictReader(path.open(encoding="utf-8")):
-            rows[row["run_id"]].append(row)
-    return rows
-
-
-def quantile(values: list[float], q: float) -> float:
-    ordered = sorted(values)
-    return ordered[min(len(ordered) - 1, int(q * (len(ordered) - 1) + 0.5))]
-
-
-def cell_stats(records: list[dict], client: dict, server: dict) -> dict:
-    """One run = one cell here (single repetition); statistics are over its requests."""
-    by_cell = defaultdict(list)
-    for r in records:
-        by_cell[(r["mode"], r["operation"], r["object_size_bytes"], r["concurrency"])].append(r)
-    stats = {}
-    for key, rows in by_cell.items():
-        totals = [r["total_ns"] / 1e6 for r in rows]
-        start = min(r["ts_start_utc_ns"] for r in rows)
-        end = max(r["ts_start_utc_ns"] + r["total_ns"] for r in rows)
-        window = max(1e-9, (end - start) / 1e9)
-        run_id = rows[0]["run_id"]
-        cpu = [float(s["proc_cpu_pct"]) for s in client.get(run_id, []) if s["proc_cpu_pct"]]
-        scpu = [float(s["proc_cpu_pct"]) for s in server.get(run_id, []) if s["proc_cpu_pct"]]
-        rss = [float(s["proc_rss_bytes"]) for s in client.get(run_id, [])]
-        stats[key] = {
-            "n": len(rows),
-            "median_ms": statistics.median(totals),
-            "p95_ms": quantile(totals, 0.95),
-            "p99_ms": quantile(totals, 0.99),
-            "handshake_median_ms": statistics.median(
-                (r["ke_ns"] + r["kdf_ns"]) / 1e6 for r in rows),
-            "stage_mean_ms": {s: statistics.fmean(r[s] for r in rows) / 1e6 for s, _ in STAGES},
-            "ops_per_s": len(rows) / window,
-            "mib_per_s": len(rows) * key[2] / MIB / window,
-            "cpu_ms_per_req": statistics.fmean(r["cpu_thread_ns"] for r in rows) / 1e6,
-            "client_cpu_pct": statistics.fmean(cpu) if cpu else float("nan"),
-            "server_cpu_pct": statistics.fmean(scpu) if scpu else float("nan"),
-            "client_rss_mib": max(rss) / MIB if rss else float("nan"),
-            "metadata_bytes": statistics.median(r["metadata_bytes"] for r in rows),
-        }
-    return stats
-
-
-# ------------------------------------------------------------------ outputs
-
-class Numbers:
-    """Collects \\newcommand macros so the text quotes generated values only."""
-
+class Macros:
     def __init__(self) -> None:
         self.lines: list[str] = []
+        self.names: set[str] = set()
 
-    def add(self, name: str, value, fmt: str = "{:.1f}") -> None:
-        text = fmt.format(value) if not isinstance(value, str) else value
-        self.lines.append(f"\\newcommand{{\\{name}}}{{{text}}}")
+    def add(self, name: str, value) -> None:
+        if not re.fullmatch(r"[A-Za-z]+", name) or name in self.names:
+            raise ValueError(f"bad or duplicate macro name {name}")
+        self.names.add(name)
+        self.lines.append(f"\\newcommand{{\\{name}}}{{{value}}}")
 
     def write(self, path: Path) -> None:
         path.write_text("% Generated by analysis/make_paper_assets.py -- do not edit.\n"
@@ -129,281 +80,520 @@ def tex_table(path: Path, header: list[str], rows: list[list[str]], align: str) 
         f"{body} \\\\\n\\bottomrule\n\\end{{tabular}}\n", encoding="utf-8")
 
 
-def fmt(value: float, digits: int = 2) -> str:
-    return "--" if math.isnan(value) else f"{value:.{digits}f}"
+def num(value: float, digits: int = 0) -> str:
+    """Number for LaTeX with thousands separators; negative digits round to tens, hundreds."""
+    if value is None or math.isnan(value):
+        return "--"
+    if digits < 0:
+        value, digits = round(value, digits), 0
+    text = f"{value:,.{digits}f}".replace(",", "{,}")
+    return "$-$" + text[1:] if text.startswith("-") else text
 
 
-def fig_latency_by_mode(stats: dict, out: Path, concurrency: int) -> None:
-    panels = [(op, size) for op in ("put", "get") for size in (1024, 1048576)]
-    fig, axes = plt.subplots(1, 4, figsize=(7.1, 1.9), sharey=True)
-    for ax, (op, size) in zip(axes, panels, strict=True):
-        values = [stats.get((m, op, size, concurrency), {}).get("median_ms", float("nan"))
-                  for m in MODES]
-        colors = [SLOT[1] if m in ("P1", "P2") else SLOT[0] for m in MODES]
-        bars = ax.barh(range(len(MODES)), values, color=colors, height=0.62)
-        for bar, value in zip(bars, values, strict=True):
-            ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2, f" {value:.1f}",
-                    va="center", ha="left", fontsize=6.5, color=INK)
-        ax.set_title(f"{op.upper()} {SIZE_LABEL[size]}", fontsize=8, color=INK)
-        ax.set_xlabel("median latency (ms)")
-        ax.set_xlim(0, max(v for v in values if not math.isnan(v)) * 1.35)
-        ax.grid(axis="y", visible=False)
-    axes[0].set_yticks(range(len(MODES)), [MODE_NAME[m] for m in MODES])
-    axes[0].invert_yaxis()
-    fig.savefig(out)
-    plt.close(fig)
+def pct(ratio: float, digits: int = 0) -> str:
+    return num(abs(ratio - 1) * 100, digits)
 
 
-def fig_stage_breakdown(stats: dict, out: Path, mode: str, op: str, concurrency: int) -> None:
-    """Composition of client-side time (everything except storage), with the storage share
-    printed beside each bar: storage is >90% everywhere and would hide the other stages."""
-    sizes = [s for s in (1024, 65536, 1048576, 16777216) if (mode, op, s, concurrency) in stats]
-    client_stages = STAGES[:4]
-    fig, ax = plt.subplots(figsize=(3.4, 1.9))
-    left = [0.0] * len(sizes)
-    for index, (stage, label) in enumerate(client_stages):
-        shares = []
-        for size in sizes:
-            means = stats[(mode, op, size, concurrency)]["stage_mean_ms"]
-            client_total = sum(means[s] for s, _ in client_stages)
-            shares.append(100 * means[stage] / client_total)
-        ax.barh(range(len(sizes)), shares, left=left, color=SLOT[index], height=0.6,
-                edgecolor="white", linewidth=1.0, label=label)
-        for i, share in enumerate(shares):
-            if share >= 12:
-                ax.text(left[i] + share / 2, i, f"{share:.0f}%", ha="center", va="center",
-                        fontsize=6, color="white" if index in (0, 1) else INK)
-        left = [a + b for a, b in zip(left, shares, strict=True)]
-    for i, size in enumerate(sizes):
-        means = stats[(mode, op, size, concurrency)]["stage_mean_ms"]
-        storage = 100 * means["s3_ns"] / sum(means.values())
-        client_ms = sum(means[s] for s, _ in client_stages)
-        ax.text(101, i, f"{client_ms:.2f} ms client-side\nstorage {storage:.1f}% of total",
-                va="center", ha="left", fontsize=5.5, color=INK2)
-    ax.set_yticks(range(len(sizes)), [SIZE_LABEL[s] for s in sizes])
-    ax.invert_yaxis()
-    ax.set_xlim(0, 100)
-    ax.set_xlabel(f"share of client-side {op.upper()} time, mode {mode} (%)")
-    ax.grid(axis="y", visible=False)
-    ax.legend(ncol=2, fontsize=6, loc="upper center", bbox_to_anchor=(0.5, -0.32))
-    fig.savefig(out)
-    plt.close(fig)
+def size_label(size: int) -> str:
+    return f"{size // MIB}\\,MiB" if size >= MIB else f"{size // 1024}\\,KiB"
 
 
-def fig_throughput(stats: dict, out: Path) -> None:
-    modes = [("B1", SLOT[0], "o"), ("R1", SLOT[1], "s"), ("P1", SLOT[2], "^")]
-    panels = [("put", 1024, "ops_per_s", "PUT 1 KiB (ops/s)"),
-              ("get", 1024, "ops_per_s", "GET 1 KiB (ops/s)"),
-              ("put", 16777216, "mib_per_s", "PUT 16 MiB (MiB/s)"),
-              ("get", 16777216, "mib_per_s", "GET 16 MiB (MiB/s)")]
-    fig, axes = plt.subplots(1, 4, figsize=(7.1, 1.9))
-    for ax, (op, size, metric, title) in zip(axes, panels, strict=True):
-        for mode, color, marker in modes:
-            points = sorted((c, v[metric]) for (m, o, s, c), v in stats.items()
-                            if m == mode and o == op and s == size)
-            if not points:
+# ---------------------------------------------------------------- data access
+
+def cell(table: dict, batch: str, op: str, size: int, conc: int, mode: str, bmax: int = 0,
+         loop: str = "closed", rate: float = 0.0, aware: bool = False) -> dict | None:
+    return table.get((EXPERIMENTS[batch], op, size, loop, conc, rate, mode, bmax, aware))
+
+
+def must(table: dict, *args, **kwargs) -> dict:
+    found = cell(table, *args, **kwargs)
+    if found is None:
+        raise KeyError(f"missing cell {args} {kwargs}")
+    return found
+
+
+def ratio(table, batch, op, size, conc, mode_a, mode_b, metric="ops_per_s"):
+    a, b = must(table, batch, op, size, conc, mode_a), must(table, batch, op, size, conc, mode_b)
+    return fa.paired(a["runs"], b["runs"], metric)[:3]
+
+
+def authoritative(batch: str, op: str, size: int) -> bool:
+    """Is this batch the result of record for this closed-loop operation and size?"""
+    if op == "put" and size <= 65536:
+        return batch == "D"
+    return batch in ("A", "B")
+
+
+# ---------------------------------------------------------------- figures
+
+def fig_throughput(table: dict, out: Path) -> None:
+    panels = [("put", 65536, "D"), ("put", MIB, "A"), ("put", 16 * MIB, "A"),
+              ("get", 65536, "A"), ("get", MIB, "A"), ("get", 16 * MIB, "A")]
+    fig, axes = plt.subplots(2, 3, figsize=(7.1, 3.6))
+    for ax, (op, size, batch) in zip(axes.flat, panels):
+        for mode in ["B0", "B1", "R1", "B2", "P1", "P2"]:
+            series = sorted((c for c in table.values()
+                             if c["experiment"] == EXPERIMENTS[batch] and c["loop"] == "closed"
+                             and c["operation"] == op and c["size"] == size
+                             and c["mode"] == mode), key=lambda c: c["concurrency"])
+            if not series:
                 continue
-            xs, ys = zip(*points, strict=True)
-            ax.plot(xs, ys, color=color, marker=marker, markersize=4, label=mode)
-        ax.set_xscale("log", base=2)
-        ax.set_xticks([1, 4, 16], ["1", "4", "16"])
-        ax.set_xlabel("concurrent workers")
-        ax.set_title(title, fontsize=8, color=INK)
-        ax.set_ylim(bottom=0)
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.tight_layout(w_pad=1.0, rect=(0, 0.1, 1, 1))
-    fig.legend(handles, [f"{l} ({MODE_NAME[l].split(' ', 1)[1]})" for l in labels],
-               loc="lower center", ncol=3, fontsize=6.5, bbox_to_anchor=(0.5, 0.0))
-    fig.savefig(out)
-    plt.close(fig)
-
-
-def fig_n1(n1_records: list[dict], out: Path) -> dict:
-    groups = defaultdict(list)
-    for r in n1_records:
-        label = f"B={r['session_bmax']}" if r["mode"] == "N1" else r["mode"]
-        groups[(r["operation"], r["concurrency"], label)].append(r["ke_ns"] / 1e3)
-    means = {k: statistics.fmean(v) for k, v in groups.items()}
-    fig, axes = plt.subplots(1, 2, figsize=(3.4, 1.9), sharey=True)
-    for ax, op in zip(axes, ("put", "get"), strict=True):
-        for index, concurrency in enumerate((1, 8)):
-            xs = [1, 10, 100]
-            ys = [means.get((op, concurrency, f"B={b}"), float("nan")) for b in xs]
-            ax.plot(xs, ys, marker="o", markersize=4, color=SLOT[index],
-                    label=f"N1, {concurrency} worker{'s' if concurrency > 1 else ''}")
-            p1 = means.get((op, concurrency, "P1"))
-            if p1:
-                ax.axhline(p1, color=SLOT[index], linestyle=":", linewidth=1.0)
+            x = [c["concurrency"] for c in series]
+            y = [c["mib_per_s"] for c in series]
+            err = [[c["mib_per_s"] - c["mib_per_s_lo"] for c in series],
+                   [c["mib_per_s_hi"] - c["mib_per_s"] for c in series]]
+            ax.errorbar(x, y, yerr=err, color=COLOR[mode], marker=MARKER[mode], label=LABEL[mode],
+                        capsize=1.5, elinewidth=0.7)
         ax.set_xscale("log")
-        ax.set_xticks([1, 10, 100], ["1", "10", "100"])
-        ax.set_xlabel("session bound B")
-        ax.set_title(op.upper(), fontsize=8, color=INK)
+        ax.set_xticks([1, 8, 32, 128, 500])
+        ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+        ax.set_title(f"{op.upper()} {size_label(size).replace(chr(92) + ',', ' ')} "
+                     f"(batch {batch})", fontsize=7.5)
         ax.set_ylim(bottom=0)
-    axes[0].set_ylabel("mean key establishment (µs)")
-    axes[0].legend(fontsize=5.5, loc="upper right")
-    fig.tight_layout(w_pad=0.8)
-    fig.savefig(out)
+        if size == 65536:
+            ax.set_ylabel("MiB/s")
+        if op == "get":
+            ax.set_xlabel("concurrent workers")
+    handles, labels = axes[0, 1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=6, bbox_to_anchor=(0.5, 1.04))
+    fig.tight_layout()
+    fig.savefig(out / "fig-throughput.pdf")
     plt.close(fig)
-    return means
 
 
-def fig_memory(memory: dict, out: Path) -> dict:
-    by_size = defaultdict(list)
-    for run in memory["runs"]:
-        by_size[run["size"]].append(run["growth"] / MIB)
-    sizes = sorted(by_size)
-    growth = [min(by_size[s]) for s in sizes]
-    fig, ax = plt.subplots(figsize=(3.4, 1.6))
-    ax.plot([s / MIB for s in sizes], growth, marker="o", markersize=4, color=SLOT[0],
-            label="measured peak RSS growth")
-    ax.plot([s / MIB for s in sizes], [s / MIB for s in sizes], color=INK2, linestyle=":",
-            linewidth=1.0, label="object size (whole-object buffering)")
-    for s, g in zip(sizes, growth, strict=True):
-        ax.annotate(f"{g:.0f}", (s / MIB, g), textcoords="offset points", xytext=(0, 5),
-                    ha="center", fontsize=6, color=INK)
-    ax.set_xscale("log", base=2)
-    ax.set_yscale("log", base=2)
-    ticks = [s / MIB for s in sizes]
-    ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
-    ax.set_yticks([1, 4, 16, 64, 256], ["1", "4", "16", "64", "256"])
-    ax.minorticks_off()
-    ax.set_xlabel("object size (MiB)")
-    ax.set_ylabel("MiB")
-    ax.legend(fontsize=6, loc="upper left")
-    fig.savefig(out)
+def fig_size(table: dict, out: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(3.5, 1.9), sharey=True)
+    for ax, op in zip(axes, ("put", "get")):
+        for mode in ["B0", "B1", "R1", "B2", "P1"]:
+            series = sorted((c for c in table.values()
+                             if c["experiment"] == "final-b" and c["operation"] == op
+                             and c["concurrency"] == 1 and c["mode"] == mode),
+                            key=lambda c: c["size"])
+            ax.plot([c["size"] / MIB for c in series], [c["p50_ms"] for c in series],
+                    color=COLOR[mode], marker=MARKER[mode], label=LABEL[mode])
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_title(f"{op.upper()}, 1 worker (batch B)", fontsize=7.5)
+        ax.set_xlabel("object size (MiB)")
+    axes[0].set_ylabel("median latency (ms)")
+    axes[1].legend(fontsize=6, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out / "fig-size.pdf")
     plt.close(fig)
-    return dict(zip(sizes, growth, strict=True))
 
 
-# ------------------------------------------------------------------ main
+def fig_queue(q_rows: list[dict], out: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(3.5, 2.0), sharey=True)
+    for ax, size in zip(axes, (1024, 65536)):
+        for mode in ("B1", "P1"):
+            rows = [q for q in q_rows if q["size"] == size and q["mode"] == mode]
+            stable = [q for q in rows if q["stable"]]
+            unstable = [q for q in rows if not q["stable"]]
+            ax.plot([q["rho"] for q in stable], [q["measured_mean_ms"] for q in stable],
+                    color=COLOR[mode], marker=MARKER[mode], linestyle="none",
+                    label=f"{mode} measured")
+            ax.plot([q["rho"] for q in unstable], [q["measured_mean_all_ms"] for q in unstable],
+                    color=COLOR[mode], marker=MARKER[mode], markerfacecolor="white",
+                    linestyle="none", label=f"{mode} unstable (lower bound)")
+            model = [q for q in rows if q["rho"] < 1]
+            ax.plot([q["rho"] for q in model], [q["predicted_mean_ms"] for q in model],
+                    color=COLOR[mode], linestyle=":", label=f"{mode} M/M/c")
+        ax.axvline(1.0, color=INK2, linewidth=0.6)
+        ax.set_yscale("log")
+        ax.set_xlabel(r"offered load $\rho=\lambda/\mu$")
+        ax.set_title(f"{size_label(size).replace(chr(92) + ',', ' ')} PUT (batch C)", fontsize=7.5)
+    axes[0].set_ylabel("mean response time (ms)")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.tight_layout()
+    fig.legend(handles, labels, fontsize=5.5, loc="upper center", ncol=3,
+               bbox_to_anchor=(0.5, 0.0))
+    fig.savefig(out / "fig-queue.pdf")
+    plt.close(fig)
+
+
+def fig_n1(table: dict, out: Path) -> None:
+    """(a) CPU saved per request vs B_max; (b) throughput N1/P1 vs workers at B_max = 100."""
+    fig, axes = plt.subplots(1, 2, figsize=(3.5, 1.9))
+    series = [("D", "put", 65536, "64 KiB PUT (D)", "-"), ("C", "get", 65536, "64 KiB GET (C)", "--"),
+              ("D", "put", 1024, "1 KiB PUT (D)", "-."), ("C", "get", 1024, "1 KiB GET (C)", ":")]
+    for batch, op, size, label, style in series:
+        xs, ys, lo, hi = [], [], [], []
+        for bmax in (10, 100, 1000):
+            n1 = must(table, batch, op, size, 32, "N1", bmax)
+            p1 = must(table, batch, op, size, 32, "P1")
+            d, dlo, dhi, _ = fa.paired_diff(n1["runs"], p1["runs"], "cpu_ms_per_req")
+            xs.append(bmax)
+            ys.append(-d * 1000)          # saving = -(N1 - P1); its CI is [-dhi, -dlo]
+            lo.append((dhi - d) * 1000)
+            hi.append((d - dlo) * 1000)
+        axes[0].errorbar(xs, ys, yerr=[lo, hi], linestyle=style, color=INK2, marker="o",
+                         capsize=1.5, label=label)
+        xs, ys, err_lo, err_hi = [], [], [], []
+        for conc in (1, 32, 128):
+            r, rlo, rhi = fa.paired(must(table, batch, op, size, conc, "N1", 100)["runs"],
+                                    must(table, batch, op, size, conc, "P1")["runs"], "ops_per_s")[:3]
+            xs.append(conc)
+            ys.append(r)
+            err_lo.append(r - rlo)
+            err_hi.append(rhi - r)
+        axes[1].errorbar(xs, ys, yerr=[err_lo, err_hi], linestyle=style, color=INK2, marker="o",
+                         capsize=1.5, label=label)
+    axes[0].set_xscale("log")
+    axes[0].set_xlabel("session bound $B_{\\max}$")
+    axes[0].set_ylabel("CPU saved vs P1 (µs/request)")
+    axes[0].set_title("32 workers", fontsize=7.5)
+    axes[1].set_xscale("log")
+    axes[1].axhline(1.0, color=INK2, linewidth=0.6)
+    axes[1].axhspan(1 - fa.MARGIN, 1 + fa.MARGIN, color=GRID, alpha=0.6, linewidth=0)
+    axes[1].set_xlabel("concurrent workers")
+    axes[1].set_ylabel("throughput N1/P1")
+    axes[1].set_title("$B_{\\max}=100$", fontsize=7.5)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.tight_layout()
+    fig.legend(handles, labels, fontsize=5.5, loc="upper center", ncol=4,
+               bbox_to_anchor=(0.5, 0.0))
+    fig.savefig(out / "fig-n1.pdf")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------- main
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--experiment", type=Path, required=True)
-    parser.add_argument("--n1", type=Path, required=True)
-    parser.add_argument("--micro", type=Path, required=True)
-    parser.add_argument("--memory", type=Path, required=True)
+    parser.add_argument("--runs", type=Path, default=Path("results/final/runs.csv"))
+    parser.add_argument("--metadata", type=Path, default=Path("results/final/metadata.csv"))
+    parser.add_argument("--baselines", type=Path, default=Path("experiments/baselines"))
+    parser.add_argument("--experiments", type=Path, default=Path("experiments"))
     parser.add_argument("--out", type=Path, default=Path("paper/generated"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    num = Numbers()
+    for stale in args.out.glob("*"):
+        stale.unlink()
 
-    # --- main experiment
-    import yaml
-    manifest = yaml.safe_load((args.experiment / "run-manifest.yaml").read_text())
-    env = manifest["environment"]
-    records = load_records(args.experiment)
-    stats = cell_stats(records, load_samples(args.experiment / "client-samples.csv"),
-                       load_samples(args.experiment / "server-samples.csv"))
-    num.add("ExpRuns", len(manifest["runs"]), "{:d}")
-    num.add("ExpRequests", len(records), "{:,}")
-    num.add("ExpCPU", env["cpu_model"].replace("Apple ", ""), "{}")
-    num.add("ExpCores", env["logical_cores"], "{:d}")
-    num.add("ExpRAMGiB", env["ram_bytes"] / 2**30, "{:.0f}")
-    num.add("ExpPython", env["python"], "{}")
-    num.add("ExpLiboqs", env["liboqs_version"], "{}")
-    num.add("ExpCommit", manifest["git_commit"][:7], "{}")
+    runs = fa.load_runs(args.runs)
+    fa.flag_stalls(runs)
+    table = fa.cells(runs)
+    fa.mark_saturation(table)
+    iperf = json.loads(max(args.baselines.glob("iperf3-*.json")).read_text())
+    link_mib = iperf["end"]["sum_received"]["bits_per_second"] / 8 / MIB
+    for c in table.values():
+        c["limit"] = fa.limit_label(c, link_mib) if c["loop"] == "closed" else "open loop"
+    q_rows = fa.queueing(table)
+    m = Macros()
 
-    fig_latency_by_mode(stats, args.out / "fig-latency-by-mode.pdf", 1)
-    fig_stage_breakdown(stats, args.out / "fig-stages-p1-put.pdf", "P1", "put", 1)
-    fig_throughput(stats, args.out / "fig-throughput.pdf")
+    # Testbed and provenance.
+    manifests = {}
+    for letter, exp in EXPERIMENTS.items():
+        path = max((args.experiments / exp).glob("*/run-manifest.yaml"))
+        manifests[letter] = yaml.safe_load(path.read_text())
+    env = manifests["A"]["environment"]
+    config_env = dict(line.split("#")[0].strip().split("=", 1)
+                      for line in Path("infra/aws/config.env").read_text().splitlines()
+                      if "=" in line.split("#")[0])
+    dockerfile = Path("docker/minio.Dockerfile").read_text()
+    m.add("ClientType", config_env["CLIENT_TYPE"])
+    m.add("ServerType", config_env["SERVER_TYPE"])
+    m.add("Region", config_env["REGION"])
+    m.add("ClientCPU", env["cpu_model"].replace("(R)", "").replace("Intel ", "Intel "))
+    m.add("ClientVCPU", env["logical_cores"])
+    m.add("ClientRAMGiB", num(env["ram_bytes"] / 2**30, 0))
+    m.add("PythonVersion", env["python"])
+    m.add("CryptographyVersion", env["cryptography"])
+    m.add("MinioPyVersion", env["minio_py"])
+    m.add("LiboqsVersion", env["liboqs_version"])
+    m.add("LiboqsPyVersion", env["liboqs_python_version"])
+    m.add("MinioRelease", re.search(r"RELEASE\.[0-9T-]+Z", dockerfile).group(0).replace("_", "\\_"))
+    m.add("LinkGbit", num(iperf["end"]["sum_received"]["bits_per_second"] / 1e9, 1))
+    m.add("LinkMiB", num(link_mib, 0))
+    ping = max(args.baselines.glob("ping-*.txt")).read_text()
+    m.add("RTTms", num(float(re.search(r"= [\d.]+/([\d.]+)/", ping).group(1)), 2))
+    fio = json.loads(max(args.baselines.glob("fio-*.json")).read_text())["jobs"][0]
+    m.add("FioReadMiB", num(fio["read"]["bw"] / 1024, 0))
+    m.add("FioWriteMiB", num(fio["write"]["bw"] / 1024, 0))
+    commits = sorted({manifests[b]["git_commit"][:7] for b in manifests})
+    m.add("Commits", ", ".join(f"\\texttt{{{c}}}" for c in commits))
 
-    # Table: 1 MiB at c=1, all modes, PUT and GET
-    rows = []
-    for m in MODES:
-        row = [MODE_NAME[m]]
+    # Volume and data quality.
+    total_req = sum(r["requests"] for r in runs)
+    m.add("TotalRuns", num(len(runs)))
+    m.add("TotalRequestsM", num(total_req / 1e6, 1))
+    m.add("TotalFailures", num(sum(r["failures"] for r in runs)))
+    for letter, exp in EXPERIMENTS.items():
+        sub = [r for r in runs if r["experiment"] == exp]
+        m.add(f"Runs{letter}", num(len(sub)))
+        m.add(f"Req{letter}M", num(sum(r["requests"] for r in sub) / 1e6, 1))
+    abc = [c for c in table.values() if c["experiment"] != "final-d"]
+    d_cells = [c for c in table.values() if c["experiment"] == "final-d"]
+    m.add("CellsABC", num(len(abc)))
+    m.add("NoisyABC", num(sum(c["ops_cv"] > 0.05 for c in abc)))
+    m.add("NoisySmallPutABC", num(sum(c["ops_cv"] > 0.05 and c["operation"] == "put"
+                                      and c["size"] <= 65536 for c in abc)))
+    m.add("StallsABC", num(sum(r["stall"] for r in runs if r["experiment"] != "final-d")))
+    m.add("StallsD", num(sum(r["stall"] for r in runs if r["experiment"] == "final-d")))
+    m.add("CellsD", num(len(d_cells)))
+    m.add("NoisyD", num(sum(c["ops_cv"] > 0.05 for c in d_cells)))
+    m.add("MedianCVD", num(statistics.median(c["ops_cv"] for c in d_cells) * 100, 1))
+    m.add("MedianCVABC", num(statistics.median(c["ops_cv"] for c in abc) * 100, 1))
+    for mode in ("P1", "B1"):
+        m.add(f"CVBefore{mode.replace('1', 'one')}", num(must(table, "A", "put", 65536, 128, mode)["ops_cv"] * 100, 1))
+        m.add(f"CVAfter{mode.replace('1', 'one')}", num(must(table, "D", "put", 65536, 128, mode)["ops_cv"] * 100, 1))
+
+    # Metric 1: handshake (key establishment) per request, batch B, 1 worker, sizes <= 16 MiB.
+    hs = {}
+    for mode in ("B1", "R1", "B2", "P1"):
         for op in ("put", "get"):
-            s = stats.get((m, op, 1048576, 1))
-            base = stats.get(("B1", op, 1048576, 1))
-            row += [fmt(s["median_ms"]), fmt(s["p99_ms"]), fmt(s["handshake_median_ms"], 3),
-                    "--" if m == "B1" else f"{100 * (s['median_ms'] / base['median_ms'] - 1):+.1f}"]
-        rows.append(row)
-    tex_table(args.out / "tab-latency-1mib.tex",
-              ["Mode", "PUT p50", "PUT p99", "PUT hs.", "vs B1 \\%",
-               "GET p50", "GET p99", "GET hs.", "vs B1 \\%"], rows, "lrrrrrrrr")
-
-    # Table: resources at c=16, 1 MiB PUT
+            per_rep: dict[int, list[float]] = {}
+            for r in runs:
+                if (r["experiment"] == "final-b" and r["mode"] == mode and r["operation"] == op
+                        and r["concurrency"] == 1 and r["size"] <= 16 * MIB):
+                    per_rep.setdefault(r["repetition"], []).append(r["ke_mean_ms"])
+            hs[(mode, op)] = fa.mean_ci([statistics.fmean(v) for v in per_rep.values()])
+    words = {"B1": "Bone", "R1": "Rone", "B2": "Btwo", "P1": "Pone"}
+    for (mode, op), (mean, _, _) in hs.items():
+        m.add(f"Hs{op.capitalize()}{words[mode]}", num(mean, 3))
+    m.add("HsRoneOverPoneGet", num(hs[("R1", "get")][0] / hs[("P1", "get")][0], 0))
+    m.add("HsBtwoOverPonePut", num(hs[("B2", "put")][0] / hs[("P1", "put")][0], 1))
+    with args.metadata.open(encoding="utf-8") as fh:
+        meta = {row["mode"]: row for row in csv.DictReader(fh)}
     rows = []
-    for m in MODES:
-        s = stats.get((m, "put", 1048576, 16))
-        rows.append([MODE_NAME[m], fmt(s["mib_per_s"], 1), fmt(s["cpu_ms_per_req"], 2),
-                     fmt(s["client_cpu_pct"], 0), fmt(s["server_cpu_pct"], 0),
-                     fmt(s["client_rss_mib"], 0)])
+    for mode in ("B0", "B1", "R1", "B2", "P1", "P2"):
+        put = hs.get((mode, "put"))
+        get = hs.get((mode, "get"))
+        rows.append([LABEL[mode],
+                     f"{num(put[0], 3)} [{num(put[1], 3)}, {num(put[2], 3)}]" if put else "--",
+                     f"{num(get[0], 3)} [{num(get[1], 3)}, {num(get[2], 3)}]" if get else "--",
+                     num(int(meta[mode]["metadata_bytes"]))])
+    tex_table(args.out / "tab-handshake.tex",
+              ["Mode", "PUT (ms)", "GET (ms)", "Manifest (B)"], rows, "lrrr")
+    m.add("ManifestPone", num(int(meta["P1"]["metadata_bytes"])))
+    m.add("ManifestBtwo", num(int(meta["B2"]["metadata_bytes"])))
+    m.add("ManifestRone", num(int(meta["R1"]["metadata_bytes"])))
+    m.add("ManifestExtraPone", num(int(meta["P1"]["metadata_bytes"]) - int(meta["B2"]["metadata_bytes"])))
+
+    # Metric 2: throughput ceilings.
+    net = max(c["mib_per_s"] for c in table.values()
+              if c["experiment"] == "final-a" and c["operation"] == "get" and c["size"] >= MIB)
+    m.add("NetCeilingMiB", num(net))
+    m.add("NetCeilingPct", num(net / link_mib * 100))
+    small_put = [must(table, "D", "put", 65536, 128, mode) for mode in ("B0", "B1", "R1", "B2", "P1")]
+    m.add("PutSmallCeiling", num(statistics.fmean(c["ops_per_s"] for c in small_put), -2))
+    m.add("PutSmallCeilingMiB", num(statistics.fmean(c["mib_per_s"] for c in small_put)))
+    m.add("PutSmallClientPct", num(max(c["client_host_cores"] for c in small_put) / 16 * 100))
+    m.add("PutSmallServerPct", num(max(c["server_cores"] for c in small_put) / 16 * 100))
+    net_small = statistics.fmean(max(r["client_net_tx_mib_s"], r["client_net_rx_mib_s"])
+                                 for c in small_put for r in c["runs"])
+    m.add("PutSmallNetPct", num(net_small / link_mib * 100))
+    drift = [must(table, "D", "put", 65536, 128, mode)["ops_per_s"]
+             / must(table, "A", "put", 65536, 128, mode)["ops_per_s"] - 1
+             for mode in ("B0", "B1", "R1", "B2", "P1")]
+    m.add("BatchDriftPct", num(max(abs(x) for x in drift) * 100))
+    stall_slow = []
+    for c in table.values():
+        if c["experiment"] == "final-d" or not c["stalled_runs"]:
+            continue
+        med = statistics.median(r["ops_per_s"] for r in c["runs"])
+        stall_slow += [1 - r["ops_per_s"] / med for r in c["runs"] if r["stall"]]
+    m.add("StallSlowMin", num(min(stall_slow) * 100))
+    m.add("StallSlowMax", num(max(stall_slow) * 100))
+    mid_put = [must(table, "A", "put", MIB, 128, mode) for mode in ("B0", "B1", "R1", "B2", "P1")]
+    m.add("PutMidCeilingMiB", num(statistics.fmean(c["mib_per_s"] for c in mid_put), -1))
+    gp, gr = must(table, "A", "get", 65536, 128, "P1"), must(table, "A", "get", 65536, 128, "R1")
+    m.add("GetSmallPone", num(gp["ops_per_s"], -2))
+    m.add("GetSmallRone", num(gr["ops_per_s"], -2))
+    m.add("GetSmallPoneClientPct", num(gp["client_host_cores"] / 16 * 100))
+    m.add("GetSmallRoneClientPct", num(gr["client_host_cores"] / 16 * 100))
+    r1_ratios = [ratio(table, "A", "get", 65536, c, "R1", "P1")[0] for c in (8, 32, 128, 256, 500)]
+    m.add("RoneGetThrMin", num(min(r1_ratios), 2))
+    m.add("RoneGetThrMax", num(max(r1_ratios), 2))
+
+    # H1: P1 vs B2 over authoritative closed-loop cells.
+    h1 = fa.compare(table, "P1", "B2", ["ops_per_s", "p50_ms"], fa.closed)
+    auth = [r for r in h1 if authoritative({v: k for k, v in EXPERIMENTS.items()}[r["experiment"]],
+                                           r["operation"], r["size"])]
+    verdicts = [r["ops_per_s_verdict"].split(" ")[0] for r in auth]
+    m.add("HoneCells", num(len(auth)))
+    m.add("HoneEquiv", num(verdicts.count("equivalent")))
+    m.add("HoneInconc", num(verdicts.count("inconclusive")))
+    m.add("HoneDiff", num(verdicts.count("different")))
+    m.add("HoneExclOne", num(sum("excludes" in r["ops_per_s_verdict"] for r in auth)))
+    eq = [r["ops_per_s_ratio"] for r in auth if r["ops_per_s_verdict"].startswith("equivalent")]
+    m.add("HoneEqMin", num(min(eq), 3))
+    m.add("HoneEqMax", num(max(eq), 3))
+    sat = ratio(table, "D", "put", 65536, 128, "P1", "B2")
+    m.add("HoneSatPut", num(sat[0], 3))
+    m.add("HoneSatPutLo", num(sat[1], 3))
+    m.add("HoneSatPutHi", num(sat[2], 3))
+    get_sat = ratio(table, "A", "get", 65536, 500, "P1", "B2")
+    m.add("HoneSatGetPct", pct(get_sat[0], 1))
+    m.add("HoneSatGetLo", num(get_sat[1], 3))
+    m.add("HoneSatGetHi", num(get_sat[2], 3))
+    groups = {}
+    for r in auth:
+        letter = {v: k for k, v in EXPERIMENTS.items()}[r["experiment"]]
+        key = (letter, r["operation"], "small" if r["size"] <= 65536 else "large")
+        groups.setdefault(key, []).append(r)
+    rows = []
+    for (letter, op, size_class), items in sorted(groups.items()):
+        v = [i["ops_per_s_verdict"].split(" ")[0] for i in items]
+        sizes = sorted({i["size"] for i in items})
+        concs = sorted({i["concurrency"] for i in items})
+        rs = [i["ops_per_s_ratio"] for i in items]
+        rows.append([letter, op.upper(),
+                     ", ".join(size_label(s) for s in sizes),
+                     ", ".join(str(c) for c in concs),
+                     f"{v.count('equivalent')}/{v.count('inconclusive')}/{v.count('different')}",
+                     f"{num(min(rs), 3)}--{num(max(rs), 3)}"])
+    tex_table(args.out / "tab-h1.tex",
+              ["Batch", "Op", "Sizes", "Workers", "Eq./Inc./Diff.", "P1/B2 throughput"],
+              rows, "llp{1.5cm}p{1.3cm}cc")
+
+    # H2: ML-KEM share of request time, P1, batch B, one worker.
+    for op in ("put", "get"):
+        small = must(table, "B", op, 1024, 1, "P1")
+        large = must(table, "B", op, 500 * MIB, 1, "P1")
+        m.add(f"KeShareSmall{op.capitalize()}", num(small["ke_share"] * 100, 2))
+        m.add(f"KeShareLarge{op.capitalize()}", num(large["ke_share"] * 100, 3))
+    m.add("PoneSmallPutMs", num(must(table, "B", "put", 1024, 1, "P1")["p50_ms"], 2))
+
+    # H3: R1 vs P1 on GET.
+    m.add("HthreeSmallOnePct", pct(ratio(table, "B", "get", 65536, 1, "R1", "P1", "p50_ms")[0]))
+    m.add("HthreeSmallSat", num(ratio(table, "A", "get", 65536, 128, "R1", "P1", "p50_ms")[0], 1))
+    m.add("HthreeMidOnePct", pct(ratio(table, "B", "get", MIB, 1, "R1", "P1", "p50_ms")[0]))
+    large_eq = [ratio(table, "A", "get", s, c, "R1", "P1")[1:] for s in (MIB, 16 * MIB)
+                for c in (32, 128)]
+    m.add("HthreeLargeEquiv", "yes" if all(lo >= 0.95 and hi <= 1.05 for lo, hi in large_eq)
+          else "no")
+
+    # H4: client CPU per request, P1 minus others, batch B, one worker, sizes <= 16 MiB.
+    diffs = {}
+    for other in ("B1", "B2", "R1"):
+        vals = []
+        for op in ("put", "get"):
+            for size in (1024, 65536, MIB, 16 * MIB):
+                p1, o = must(table, "B", op, size, 1, "P1"), must(table, "B", op, size, 1, other)
+                vals.append((op, size, *fa.paired_diff(p1["runs"], o["runs"], "cpu_ms_per_req")[:3]))
+        diffs[other] = vals
+    b2 = [v[2] for v in diffs["B2"]]
+    m.add("HfourBtwoMin", num(min(b2), 3))
+    m.add("HfourBtwoMax", num(max(b2), 3))
+    r1_get = [v[2] for v in diffs["R1"] if v[0] == "get"]
+    m.add("HfourRoneGetMin", num(-max(r1_get), 2))
+    m.add("HfourRoneGetMax", num(-min(r1_get), 2))
+
+    # Hybrid and the 1 MiB AES-GCM artefact (batch A, one worker).
+    p2 = ratio(table, "A", "put", MIB, 1, "P2", "P1")
+    m.add("PtwoPutOnePct", pct(p2[0], 1))
+    p2_eq = [ratio(table, "A", op, MIB, c, "P2", "P1") for op in ("put", "get") for c in (8, 32, 128, 500)]
+    m.add("PtwoEqCount", num(sum(lo >= 0.95 and hi <= 1.05 for _, lo, hi in p2_eq)))
+    m.add("PtwoCells", num(len(p2_eq)))
+    for mode in ("B1", "P1", "P2", "B2"):
+        aead = statistics.fmean(r["aead_mean_ms"] for r in must(table, "A", "put", MIB, 1, mode)["runs"])
+        m.add(f"Aead{words.get(mode, 'Ptwo')}Mid", num(aead, 2))
+
+    # Metrics 3 and 4: CPU and memory table.
+    rows = []
+    for batch, op, size, conc in [("A", "get", 65536, 128), ("A", "put", MIB, 128),
+                                  ("B", "put", 500 * MIB, 16), ("B", "get", 500 * MIB, 16)]:
+        for mode in ("B1", "R1", "B2", "P1"):
+            c = cell(table, batch, op, size, conc, mode)
+            if not c:
+                continue
+            rows.append([f"{op.upper()} {size_label(size)} c{conc} ({batch})", mode,
+                         num(c["client_host_cores"] / 16 * 100), num(c["server_cores"] / 16 * 100),
+                         num(c["cpu_ms_per_req"], 2), num(c["client_rss_peak_mib"]),
+                         num(c["client_rss_growth_mib"]), num(c["server_rss_growth_mib"])])
     tex_table(args.out / "tab-resources.tex",
-              ["Mode", "MiB/s", "CPU ms/req", "Client CPU \\%", "Server CPU \\%",
-               "Client RSS MiB"], rows, "lrrrrr")
+              ["Workload", "Mode", "Client CPU \\%", "Server CPU \\%", "CPU ms/req",
+               "Client peak MiB", "Client growth MiB", "Server growth MiB"], rows, "llrrrrrr")
+    peaks = [must(table, "A", "put", 65536, 500, mode)["client_rss_peak_mib"]
+             for mode in ("B0", "B1", "R1", "B2", "P1")]
+    m.add("MemPeakSmallSat", num(statistics.fmean(peaks), -1))
+    m.add("MemModeSpreadPct", num((max(peaks) / min(peaks) - 1) * 100, 1))
+    big = [must(table, "B", "put", 500 * MIB, 1, mode) for mode in ("B1", "R1", "B2", "P1")]
+    m.add("MemGrowthLargeOne", num(max(c["client_rss_growth_mib"] for c in big)))
 
-    # Metadata bytes per object (1 KiB PUT, c=1)
-    rows = []
-    for m in MODES:
-        s = stats.get((m, "put", 1024, 1))
-        rows.append([MODE_NAME[m], f"{s['metadata_bytes']:.0f}"])
-    tex_table(args.out / "tab-metadata.tex", ["Mode", "Manifest bytes"], rows, "lr")
+    # N1 (CPU saving, throughput effect, queue-aware bound).
+    saves = []
+    for batch, op in (("D", "put"), ("C", "get")):
+        for size in (1024, 65536):
+            for conc in (1, 32, 128):
+                for bmax in (100, 1000):
+                    n1, p1 = must(table, batch, op, size, conc, "N1", bmax), must(table, batch, op, size, conc, "P1")
+                    saves.append(-fa.paired_diff(n1["runs"], p1["runs"], "cpu_ms_per_req")[0])
+    m.add("NoneSaveMinUs", num(min(saves) * 1000))
+    m.add("NoneSaveMaxUs", num(max(saves) * 1000))
+    gains = [fa.paired(must(table, "C", "get", s, c, "N1", 100)["runs"],
+                       must(table, "C", "get", s, c, "P1")["runs"], "ops_per_s")
+             for s in (1024, 65536) for c in (32, 128)]
+    m.add("NoneGetGainMin", pct(min(g[0] for g in gains), 1))
+    m.add("NoneGetGainMax", pct(max(g[0] for g in gains), 1))
+    m.add("NoneGetClientPct", num(must(table, "C", "get", 1024, 128, "P1")["client_host_cores"] / 16 * 100))
+    put_n1 = [fa.paired(must(table, "D", "put", s, c, "N1", 100)["runs"],
+                        must(table, "D", "put", s, c, "P1")["runs"], "ops_per_s")
+              for s in (1024, 65536) for c in (1, 32, 128)]
+    m.add("NonePutEquiv", num(sum(fa.verdict(r[1], r[2]).startswith("equivalent") for r in put_n1)))
+    m.add("NonePutCells", num(len(put_n1)))
+    m.add("NoneKemPerReqHundred", num(must(table, "D", "put", 1024, 32, "N1", 100)["kem_per_request"], 4))
+    for rate, word in ((1500.0, "Low"), (3500.0, "Mid")):
+        aware = must(table, "C", "put", 1024, 128, "N1", 100, loop="open", rate=rate, aware=True)
+        fixed = must(table, "C", "put", 1024, 128, "N1", 100, loop="open", rate=rate)
+        m.add(f"QaBound{word}", num(aware["mean_session_bound"], 1))
+        m.add(f"QaKemRatio{word}", num(aware["kem_per_request"] / fixed["kem_per_request"], 1))
+        p99 = fa.paired(aware["runs"], fixed["runs"], "sojourn_p99_ms")
+        m.add(f"QaPninetyRatio{word}", num(p99[0], 2))
+        m.add(f"QaPninetyLo{word}", num(p99[1], 2))
+        m.add(f"QaPninetyHi{word}", num(p99[2], 2))
+        m.add(f"QaRate{word}", num(rate))
+    sat_aware = must(table, "C", "put", 1024, 128, "N1", 100, loop="open", rate=6000.0, aware=True)
+    m.add("QaBoundSat", num(sat_aware["mean_session_bound"], 1))
 
-    # Quoted numbers from the main experiment
-    def med(m, op, size, c):
-        return stats[(m, op, size, c)]["median_ms"]
+    # RQ3: queueing.
+    words_size = {1024: "Small", 65536: "Mid"}
+    for size, word in words_size.items():
+        rows_s = [q for q in q_rows if q["size"] == size and q["mode"] == "P1"]
+        rows_b = [q for q in q_rows if q["size"] == size and q["mode"] == "B1"]
+        both = rows_s + rows_b
+        last_stable = max(q["rho"] for q in both if q["stable"])
+        first_unstable = min(q["rho"] for q in both if not q["stable"])
+        m.add(f"Q{word}KneeLo", num(last_stable, 2))
+        m.add(f"Q{word}KneeHi", num(first_unstable, 2))
+        m.add(f"Q{word}Cap", num(statistics.fmean([rows_s[0]["capacity"], rows_b[0]["capacity"]]), -2))
+        m.add(f"Q{word}Servers", num(rows_s[0]["servers"]))
+        m.add(f"Q{word}Szero", num(rows_s[0]["s0_ms"], 1))
+        knee = min((q for q in rows_s if not q["stable"]), key=lambda q: q["rho"])
+        m.add(f"Q{word}PredKnee", num(knee["predicted_mean_ms"], 1))
+        m.add(f"Q{word}MeasKnee", num(knee["measured_mean_all_ms"]))
+        m.add(f"Q{word}KneeRate", num(knee["rate"]))
+        stable = [q for q in both if q["stable"]]
+        err = [abs(q["predicted_mean_ms"] / q["measured_mean_ms"] - 1) * 100 for q in stable]
+        m.add(f"Q{word}StableErrPct", num(max(err)))
+        svc_low = min(q["service_p50_ms"] for q in rows_s)
+        svc_high = max(q["service_p50_ms"] for q in rows_s)
+        m.add(f"Q{word}SvcLow", num(svc_low, 1))
+        m.add(f"Q{word}SvcHigh", num(svc_high, 0))
 
-    for op in ("put", "get"):
-        opn = op.capitalize()
-        for size, tag in ((1024, "Small"), (1048576, "Mid")):
-            p1, b2, r1, b1 = (med(m, op, size, 1) for m in ("P1", "B2", "R1", "B1"))
-            num.add(f"Ovh{opn}{tag}PoneBtwo", 100 * (p1 / b2 - 1), "{:+.1f}")
-            num.add(f"Ovh{opn}{tag}PoneBone", 100 * (p1 / b1 - 1), "{:+.1f}")
-            num.add(f"Ovh{opn}{tag}RoneBone", 100 * (r1 / b1 - 1), "{:+.1f}")
-            num.add(f"Lat{opn}{tag}Pone", p1, "{:.2f}")
-            num.add(f"Lat{opn}{tag}Rone", r1, "{:.2f}")
-    for size, tag in ((1024, "Small"), (16777216, "Large")):
-        means = stats[("P1", "put", size, 1)]["stage_mean_ms"]
-        client_total = sum(v for k, v in means.items() if k != "s3_ns")
-        for stage, short in (("ke_ns", "KE"), ("ser_ns", "Ser"), ("aead_ns", "Aead")):
-            num.add(f"ClientShare{short}{tag}", 100 * means[stage] / client_total, "{:.0f}")
-        num.add(f"KEShare{tag}", 100 * means["ke_ns"] / sum(means.values()), "{:.1f}")
-        num.add(f"StorageShare{tag}", 100 * means["s3_ns"] / sum(means.values()), "{:.1f}")
+    # Sources table.
+    tex_table(args.out / "tab-sources.tex", ["Batch", "Runs", "Requests", "Result of record for"], [
+        ["A", num(len([r for r in runs if r["experiment"] == "final-a"])),
+         f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-a') / 1e6, 1)}\\,M",
+         "concurrency sweep: GET; PUT $\\geq$1\\,MiB; hybrid P2"],
+        ["B", num(len([r for r in runs if r["experiment"] == "final-b"])),
+         f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-b') / 1e6, 1)}\\,M",
+         "object size 1\\,KiB--500\\,MiB; handshake cost"],
+        ["C", num(len([r for r in runs if r["experiment"] == "final-c"])),
+         f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-c') / 1e6, 1)}\\,M",
+         "open loop (RQ3); N1 on GET; queue-aware N1"],
+        ["D", num(len([r for r in runs if r["experiment"] == "final-d"])),
+         f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-d') / 1e6, 1)}\\,M",
+         "PUT $\\leq$64\\,KiB incl.\\ N1 (40\\,s pause)"],
+    ], "lrrp{4.2cm}")
 
-    # --- micro-benchmarks
-    micro = json.loads(args.micro.read_text())["results"]
-    rows = []
-    for m in ("B1", "R1", "B2", "P1", "P2"):
-        rows.append([MODE_NAME[m], fmt(micro[f"{m}.establish"]["median_us"], 1),
-                     fmt(micro[f"{m}.recover"]["median_us"], 1)])
-    for b in (10, 100):
-        rows.append([f"N1, B={b} (amortized)", fmt(micro[f"N1-B{b}.establish"]["median_us"], 1),
-                     "--"])
-    tex_table(args.out / "tab-micro.tex", ["Mode", "Sender (µs)", "Receiver (µs)"], rows, "lrr")
-    num.add("MicroPoneEnc", micro["P1.establish"]["median_us"])
-    num.add("MicroPoneDec", micro["P1.recover"]["median_us"])
-    num.add("MicroRoneEnc", micro["R1.establish"]["median_us"])
-    num.add("MicroRoneDec", micro["R1.recover"]["median_us"], "{:,.0f}")
-    num.add("MicroBtwoEnc", micro["B2.establish"]["median_us"])
-    num.add("MicroBtwoDec", micro["B2.recover"]["median_us"])
-    num.add("MicroPtwoEnc", micro["P2.establish"]["median_us"])
-    num.add("MicroRoneOverPone", micro["R1.recover"]["median_us"] / micro["P1.recover"]["median_us"],
-            "{:.0f}")
-    num.add("MicroHKDF", micro["HKDF-SHA256.derive"]["median_us"])
-    num.add("MicroAESGiBs", 4 / 1024 / (micro["AES-256-GCM.encrypt-4MiB"]["median_us"] / 1e6),
-            "{:.1f}")
-
-    # --- N1 experiment
-    n1_means = fig_n1(load_records(args.n1), args.out / "fig-n1.pdf")
-    for op in ("put", "get"):
-        p1 = n1_means[(op, 8, "P1")]
-        num.add(f"NOne{op.capitalize()}ReductionHundred", p1 / n1_means[(op, 8, "B=100")],
-                "{:.1f}")
-        num.add(f"NOne{op.capitalize()}ReductionTen", p1 / n1_means[(op, 8, "B=10")], "{:.1f}")
-
-    # --- memory
-    growth = fig_memory(json.loads(args.memory.read_text()), args.out / "fig-memory.pdf")
-    sizes = sorted(growth)
-    num.add("MemSmallest", growth[sizes[0]], "{:.0f}")
-    num.add("MemLargest", growth[sizes[-1]], "{:.0f}")
-    num.add("MemLargestSize", sizes[-1] / MIB, "{:.0f}")
-    num.add("MemSmallestSize", sizes[0] / MIB, "{:.0f}")
-
-    num.write(args.out / "numbers.tex")
-    (args.out / "summary.json").write_text(json.dumps(
-        {f"{k[0]}|{k[1]}|{k[2]}|{k[3]}": v for k, v in stats.items()}, indent=1))
-    print(f"wrote assets to {args.out}")
+    fig_throughput(table, args.out)
+    fig_size(table, args.out)
+    fig_queue(q_rows, args.out)
+    fig_n1(table, args.out)
+    m.write(args.out / "numbers.tex")
+    print(f"wrote {len(m.names)} macros, 4 figures, 4 tables to {args.out}")
 
 
 if __name__ == "__main__":
