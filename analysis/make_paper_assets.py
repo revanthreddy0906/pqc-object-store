@@ -23,6 +23,7 @@ import json
 import math
 import re
 import statistics
+import subprocess
 import sys
 from pathlib import Path
 
@@ -254,6 +255,22 @@ def fig_n1(table: dict, out: Path) -> None:
                bbox_to_anchor=(0.5, 0.0))
     fig.savefig(out / "fig-n1.pdf")
     plt.close(fig)
+
+
+def code_lines(paths: list[str]) -> int:
+    """Non-blank lines of the project's own code (Python, shell, Dockerfiles)."""
+    total = 0
+    for pattern in paths:
+        for path in Path().glob(pattern):
+            if path.is_file() and (path.suffix in (".py", ".sh") or "Dockerfile" in path.name):
+                total += sum(1 for line in path.read_text().splitlines() if line.strip())
+    return total
+
+
+def test_count() -> int:
+    out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"],
+                         capture_output=True, text=True, check=False).stdout
+    return int(re.search(r"(\d+) tests? collected", out).group(1))
 
 
 # ---------------------------------------------------------------- main
@@ -597,6 +614,27 @@ def main() -> None:
         svc_high = max(q["service_p50_ms"] for q in rows_s)
         m.add(f"Q{word}SvcLow", num(svc_low, 1))
         m.add(f"Q{word}SvcHigh", num(svc_high, 0))
+
+    # Implementation: components, code size and tests (counted, not typed).
+    components = [
+        ("Cryptographic core", "ML-KEM wrapper, modes, HKDF, chunked AES-GCM, manifest, sessions",
+         ["src/pqcstore/crypto/*.py"]),
+        ("Storage layer", "streaming PUT/GET, commit protocol, versions, garbage collection",
+         ["src/pqcstore/storage/*.py"]),
+        ("Benchmark harness", "runner, payloads, samplers, records, validator, micro-benchmarks",
+         ["src/pqcstore/benchmark/*.py", "src/pqcstore/timing.py"]),
+        ("Command-line tool", "keys, settings and the \\texttt{pqcstore} commands",
+         ["src/pqcstore/cli.py", "src/pqcstore/settings.py", "src/pqcstore/keys.py"]),
+        ("Testbed automation", "AWS provisioning, VM roles, MinIO image",
+         ["infra/aws/*.sh", "scripts/*.sh", "docker/*Dockerfile"]),
+        ("Analysis pipeline", "per-run summaries, statistics, paper assets", ["analysis/*.py"]),
+        ("Tests", "unit, interoperability, tamper, secret-hygiene and integration tests", ["tests/*.py"]),
+    ]
+    rows = [[name, role, num(code_lines(globs))] for name, role, globs in components]
+    tex_table(args.out / "tab-components.tex", ["Component", "Responsibility", "Lines"], rows,
+              "lp{4.3cm}r")
+    m.add("LocTotal", num(sum(code_lines(globs) for _, _, globs in components)))
+    m.add("TestCount", num(test_count()))
 
     # Sources table.
     tex_table(args.out / "tab-sources.tex", ["Batch", "Runs", "Requests", "Result of record for"], [
