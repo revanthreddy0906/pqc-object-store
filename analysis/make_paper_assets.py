@@ -415,7 +415,8 @@ def main() -> None:
     m.add("HoneEquiv", num(verdicts.count("equivalent")))
     m.add("HoneInconc", num(verdicts.count("inconclusive")))
     m.add("HoneDiff", num(verdicts.count("different")))
-    m.add("HoneExclOne", num(sum("excludes" in r["ops_per_s_verdict"] for r in auth)))
+    m.add("HoneExclOne", num(sum(r["ops_per_s_verdict"].startswith("equivalent")
+                                 and "excludes" in r["ops_per_s_verdict"] for r in auth)))
     eq = [r["ops_per_s_ratio"] for r in auth if r["ops_per_s_verdict"].startswith("equivalent")]
     m.add("HoneEqMin", num(min(eq), 3))
     m.add("HoneEqMax", num(max(eq), 3))
@@ -454,6 +455,9 @@ def main() -> None:
         m.add(f"KeShareSmall{op.capitalize()}", num(small["ke_share"] * 100, 2))
         m.add(f"KeShareLarge{op.capitalize()}", num(large["ke_share"] * 100, 3))
     m.add("PoneSmallPutMs", num(must(table, "B", "put", 1024, 1, "P1")["p50_ms"], 2))
+    shares = [c["ke_share"] for c in table.values() if c["experiment"] == "final-b"
+              and c["mode"] == "P1" and c["concurrency"] == 1]
+    m.add("KeShareMax", num(max(shares) * 100, 2))
 
     # H3: R1 vs P1 on GET.
     m.add("HthreeSmallOnePct", pct(ratio(table, "B", "get", 65536, 1, "R1", "P1", "p50_ms")[0]))
@@ -509,19 +513,41 @@ def main() -> None:
              for mode in ("B0", "B1", "R1", "B2", "P1")]
     m.add("MemPeakSmallSat", num(statistics.fmean(peaks), -1))
     m.add("MemModeSpreadPct", num((max(peaks) / min(peaks) - 1) * 100, 1))
+    workloads = [("A", "get", 65536, 128), ("A", "put", MIB, 128), ("B", "put", 500 * MIB, 16),
+                 ("B", "get", 500 * MIB, 16)]
+    overlap = 0
+    for w in workloads:
+        cs = [c for c in (cell(table, *w, mode) for mode in ("B1", "R1", "B2", "P1")) if c]
+        overlap += max(c["server_rss_growth_mib_lo"] for c in cs) <= min(c["server_rss_growth_mib_hi"] for c in cs)
+    m.add("ServerGrowthOverlap", num(overlap))
+    m.add("ServerGrowthWorkloads", num(len(workloads)))
+    p1_mid = sorted(r["server_rss_growth_mib"] for r in must(table, "A", "put", MIB, 128, "P1")["runs"])
+    m.add("ServerGrowthOneRun", num(p1_mid[-1]))
+    m.add("ServerGrowthOtherRuns", num(p1_mid[-2]))
     big = [must(table, "B", "put", 500 * MIB, 1, mode) for mode in ("B1", "R1", "B2", "P1")]
     m.add("MemGrowthLargeOne", num(max(c["client_rss_growth_mib"] for c in big)))
 
     # N1 (CPU saving, throughput effect, queue-aware bound).
-    saves = []
+    saves = {1: [], 32: []}          # thread CPU saved per request: one worker, 32-128 workers
+    significant = True
+    ke_saved = []
     for batch, op in (("D", "put"), ("C", "get")):
         for size in (1024, 65536):
             for conc in (1, 32, 128):
                 for bmax in (100, 1000):
                     n1, p1 = must(table, batch, op, size, conc, "N1", bmax), must(table, batch, op, size, conc, "P1")
-                    saves.append(-fa.paired_diff(n1["runs"], p1["runs"], "cpu_ms_per_req")[0])
-    m.add("NoneSaveMinUs", num(min(saves) * 1000))
-    m.add("NoneSaveMaxUs", num(max(saves) * 1000))
+                    d, _, hi, _ = fa.paired_diff(n1["runs"], p1["runs"], "cpu_ms_per_req")
+                    saves[1 if conc == 1 else 32].append(-d)
+                    significant &= hi < 0
+                    if conc == 1:
+                        ke_saved.append(p1["ke_mean_ms"] - n1["ke_mean_ms"])
+    m.add("NoneSaveOneMin", num(min(saves[1]) * 1000))
+    m.add("NoneSaveOneMax", num(max(saves[1]) * 1000))
+    m.add("NoneSaveConcMin", num(min(saves[32]) * 1000))
+    m.add("NoneSaveConcMax", num(max(saves[32]) * 1000))
+    m.add("NoneKeSaveMin", num(min(ke_saved) * 1000))
+    m.add("NoneKeSaveMax", num(max(ke_saved) * 1000))
+    m.add("NoneSaveSignificant", "all" if significant else "not all")
     gains = [fa.paired(must(table, "C", "get", s, c, "N1", 100)["runs"],
                        must(table, "C", "get", s, c, "P1")["runs"], "ops_per_s")
              for s in (1024, 65536) for c in (32, 128)]

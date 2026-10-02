@@ -26,17 +26,11 @@ path of cloud object stores under concurrent load. We build an instrumented clie
 envelope-encryption layer for an S3-compatible store (MinIO) in which every object is protected
 by ML-KEM-768, HKDF-SHA256 and chunked AES-256-GCM, and compare it on one data path with no
 encryption, symmetric-only encryption, RSA-OAEP-4096, X25519 and a hybrid X25519+ML-KEM-768
-mode, from 1 to 500 concurrent workers and from 1\,KiB to 500\,MiB objects, on two dedicated
-cloud hosts (\TotalRuns{} runs, \TotalRequestsM{} million measured requests, \TotalFailures{}
-failures). ML-KEM-768 costs \HsPutPone\,ms per PUT and \HsGetPone\,ms per GET, at most
-\KeShareSmallGet\,\% of request time even for 1\,KiB objects. In \HoneEquiv{} of \HoneCells{}
-paired comparisons its throughput is statistically equivalent to X25519 within $\pm$5\,\%,
-and \HoneDiff{} differ by more. Every mode reaches the same network, storage or client-CPU ceiling, except
+mode, from 1 to 500 concurrent workers and from 1\,KiB to 500\,MiB objects, on two separate cloud instances (\TotalRuns{} runs, \TotalRequestsM{} million measured requests, \TotalFailures{}
+failures). ML-KEM-768 costs \HsPutPone\,ms per PUT and \HsGetPone\,ms per GET, at most \KeShareMax\,\% of request time even for the smallest objects. In \HoneEquiv{} of \HoneCells{}
+paired comparisons its throughput is statistically equivalent to X25519 within $\pm$5\,\%, and none is confirmed to differ by more (\HoneInconc{} are inconclusive). Every mode reaches the same network, storage or client-CPU ceiling, except
 RSA-4096, whose \HsGetRone\,ms decryption saturates the client and cuts small-object GET
-throughput to \RoneGetThrMin--\RoneGetThrMax{} of ML-KEM's. Bounded session amortization of
-ML-KEM saves \NoneSaveMinUs--\NoneSaveMaxUs\,\textmu s of client CPU per request, which raises
-throughput only where the client is the bottleneck. Open-loop load shows a sharp knee between
-\(\rho=\QSmallKneeLo\) and \(\QSmallKneeHi\) that an M/M/c model does not predict.
+throughput to \RoneGetThrMin--\RoneGetThrMax{} of ML-KEM's. Bounded session amortization of ML-KEM saves \NoneSaveOneMin--\NoneSaveOneMax\,\textmu s of client CPU per request at one worker and up to \NoneSaveConcMax\,\textmu s under contention, which raises throughput only where the client is the bottleneck. Open-loop load shows a sharp knee between \(\rho=\QMidKneeLo\) and \(\QSmallKneeHi\) that an M/M/c model does not predict.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -67,7 +61,7 @@ bounded session amortization of ML-KEM move that point?
 \textbf{Contributions.} (i) An instrumented, reproducible benchmark of per-object ML-KEM-768
 envelope encryption on an S3-compatible store with six key-establishment modes on one data
 path, stage-level latency decomposition, client and server resource sampling and streaming
-memory for objects of hundreds of MiB. (ii) A measurement on two dedicated cloud hosts with
+memory for objects of hundreds of MiB. (ii) A measurement on two separate cloud instances with
 five randomized repetitions per configuration, paired within-batch comparisons and explicit
 equivalence tests. (iii) An evaluation of bounded session amortization of ML-KEM, including a
 variant whose bound follows client utilization. Bounded key reuse itself is established
@@ -112,7 +106,7 @@ clients or queueing behaviour.
 time-limited bucket-level key and reduce key-service requests by up to
 99\%~\cite{s3bucketkeys}; the AWS Encryption SDK caches data keys with age and message-count
 limits~\cite{esdkcache}. Our session mode applies the same principle to ML-KEM-established
-roots in client-side encryption. We found no prior load-adaptive bound.
+roots in client-side encryption. In vendor documentation and arXiv we found no prior load-adaptive bound; a search of the academic databases is still to be completed.
 
 \section{Threat Model and Design}
 \textbf{Threat model.} The network and object store are honest-but-curious for confidentiality
@@ -171,7 +165,7 @@ any request's stage times exceed its total, a run's 99th-percentile unaccounted 
 tamper, replay, downgrade and session-bound stress tests.
 
 \section{Methodology}\label{sec:method}
-\textbf{Testbed.} Two dedicated AWS instances in one cluster placement group (\Region): the
+\textbf{Testbed.} Two AWS instances in one cluster placement group (\Region): the
 client on a \ClientType{} (\ClientCPU, \ClientVCPU{} vCPU, \ClientRAMGiB\,GiB) and MinIO, single
 node in Docker with host networking, on an \ServerType{} (16 vCPU, local NVMe). Baselines
 before the runs: \LinkGbit\,Gbit/s (\LinkMiB\,MiB/s) between the hosts with iperf3, a
@@ -255,7 +249,7 @@ network at \NetCeilingMiB\,MiB/s, \NetCeilingPct\,\% of the iperf3 baseline; 1\,
 off at about \PutMidCeilingMiB\,MiB/s. Small PUTs level off at about \PutSmallCeiling{}
 requests/s (\PutSmallCeilingMiB\,MiB/s at 64\,KiB) while the client uses at most
 \PutSmallClientPct\,\% of its CPU, the server \PutSmallServerPct\,\% and the network
-\PutSmallNetPct\,\% of the link: by elimination the limit is MinIO's write path. Small GETs are limited by
+\PutSmallNetPct\,\% of the link: by elimination the limit is MinIO's write path, possibly including its CPU, since \PutSmallServerPct\,\% of 16 vCPU leaves little headroom on 8 physical cores with hyper-threading. Small GETs are limited by
 the client CPU (\GetSmallPoneClientPct\,\% for P1 at 128 workers, \GetSmallPone{}
 requests/s). RSA-4096 reaches that limit much earlier: at \GetSmallRoneClientPct\,\% client
 CPU it delivers \GetSmallRone{} requests/s, \RoneGetThrMin--\RoneGetThrMax{} of P1's
@@ -273,8 +267,7 @@ the bottleneck, R1 and P1 are equivalent from 32 workers on.
 ratios P1/B2 over the \HoneCells{} closed-loop cells of record. \HoneEquiv{} are equivalent
 within $\pm$5\,\%, \HoneInconc{} inconclusive and \HoneDiff{} different; equivalent ratios lie
 between \HoneEqMin{} and \HoneEqMax. At the small-PUT ceiling the ratio is \HoneSatPut{}
-[\HoneSatPutLo, \HoneSatPutHi]. In \HoneExclOne{} equivalent cells the interval still excludes
-1, so a small difference exists inside the margin; the largest is where the client CPU is the
+[\HoneSatPutLo, \HoneSatPutHi]. In \HoneExclOne{} of the equivalent cells the interval still excludes 1, so a small difference exists inside the margin; the largest is where the client CPU is the
 bottleneck (64\,KiB GET, 500 workers): P1 delivers \HoneSatGetPct\,\% less than B2
 [\HoneSatGetLo, \HoneSatGetHi]. The inconclusive cells lie at the knee of the
 throughput curve (8--32 workers) or at one worker, where a single slow run widens the interval.
@@ -289,10 +282,7 @@ throughput curve (8--32 workers) or at one worker, where a single slow run widen
 \textbf{CPU and memory (RQ1).} Table~\ref{tab:resources} lists CPU and memory for
 representative workloads. Per request, P1 uses between \HfourBtwoMin{} and \HfourBtwoMax\,ms
 more client CPU than X25519 at one worker, and \HfourRoneGetMin--\HfourRoneGetMax\,ms less than
-RSA-4096 on GET. Server CPU does not depend on the mode. Client memory is dominated by the
-interpreter and buffers: about \MemPeakSmallSat\,MiB at 500 workers, within
-\MemModeSpreadPct\,\% across modes, and streaming keeps the growth of a single 500\,MiB PUT
-below \MemGrowthLargeOne\,MiB.
+RSA-4096 on GET. Server CPU does not depend on the mode. Client memory is dominated by the interpreter and buffers: about \MemPeakSmallSat\,MiB at 500 workers, within \MemModeSpreadPct\,\% across modes; its growth during a run tracks throughput (R1, the slowest on GET, grows least), and streaming keeps the growth of a single 500\,MiB PUT at most \MemGrowthLargeOne\,MiB. Server memory growth comes mostly from single runs in which MinIO grew its heap (P1 at 1\,MiB PUT: one run \ServerGrowthOneRun\,MiB, the others at most \ServerGrowthOtherRuns\,MiB); its intervals overlap across modes in \ServerGrowthOverlap{} of \ServerGrowthWorkloads{} workloads, so it does not depend on the key-establishment mode.
 
 \begin{table*}[t]
 \caption{CPU (\% of the host's 16 vCPU, measured window), client CPU time per request and memory (peak RSS and growth over the run), mean of five runs}
@@ -311,8 +301,7 @@ references.
 
 \textbf{Bounded sessions.} With a bound $B_{\max}$, N1 performed one ML-KEM operation per
 $B_{\max}$ objects (\NoneKemPerReqHundred{} per request at $B_{\max}=100$), as designed and
-as the validator checked for every session. Fig.~\ref{fig:n1} shows the effect. N1 saves
-\NoneSaveMinUs--\NoneSaveMaxUs\,\textmu s of client CPU per request against P1. Because ML-KEM is
+as the validator checked for every session. Fig.~\ref{fig:n1} shows the effect. At one worker N1 saves \NoneSaveOneMin--\NoneSaveOneMax\,\textmu s of client CPU per request against P1, matching the \NoneKeSaveMin--\NoneKeSaveMax\,\textmu s of key-establishment time it removes; with 32--128 workers the saving grows to \NoneSaveConcMin--\NoneSaveConcMax\,\textmu s, because each ML-KEM call through the Python binding costs more CPU under contention. All these intervals exclude zero. Because ML-KEM is
 a small part of every request, this is visible as throughput only where the client CPU is the
 bottleneck: small GETs at 32--128 workers (client CPU \NoneGetClientPct\,\%) run
 \NoneGetGainMin--\NoneGetGainMax\,\% faster. On PUT, where MinIO limits throughput, N1 is
@@ -334,8 +323,7 @@ not show that it is better than a smaller fixed bound.
 
 \textbf{Queueing (RQ3).} Fig.~\ref{fig:queue} shows mean response time (queue wait plus
 service) against offered load $\rho=\lambda/\mu$, with capacity $\mu$ taken from the most
-overloaded runs (\QSmallCap{} requests/s at 1\,KiB, \QMidCap{} at 64\,KiB). We model the
-system as M/M/c with $c=\mu S_0$ servers, where $S_0$ is the service time at light load
+overloaded runs (\QSmallCap{} requests/s at 1\,KiB, \QMidCap{} at 64\,KiB). We model the system as M/M/c~\cite{harchol2013} with $c=\mu S_0$ servers, where $S_0$ is the service time at light load
 (\QSmallSzero\,ms; $c=\QSmallServers$ at 1\,KiB, \QMidServers{} at 64\,KiB). Below the knee the
 model is within \QSmallStableErrPct--\QMidStableErrPct\,\% of the measurements. It misses the
 knee: at 1\,KiB and \QSmallKneeRate{} requests/s ($\rho=\QSmallKneeHi$) it predicts
@@ -389,18 +377,17 @@ network handshake; transport security was held constant.
 \section{Conclusion}
 We built and validated an instrumented, reproducible benchmark of post-quantum envelope
 encryption for S3-compatible object storage and measured it from 1 to 500 concurrent workers
-and from 1\,KiB to 500\,MiB objects on dedicated cloud hosts. ML-KEM-768 adds
+and from 1\,KiB to 500\,MiB objects on two separate cloud instances. ML-KEM-768 adds
 \HsPutPone--\HsGetPone\,ms per object, is statistically equivalent to X25519 within $\pm$5\,\%
-in \HoneEquiv{} of \HoneCells{} comparisons, with \HoneDiff{} differing by more, while RSA-4096
+in \HoneEquiv{} of \HoneCells{} comparisons, with none confirmed to differ by more, while RSA-4096
 limits small-object reads to \RoneGetThrMin--\RoneGetThrMax{} of ML-KEM's throughput. Bounded session amortization helps only when
 the client CPU is the bottleneck, and a queueing model with load-independent service time does
 not predict where response time collapses.
 
 \section*{Artifact}
-Code, configurations, the raw-data validator and the analysis scripts that generate every
-figure, table and number in this paper (\texttt{analysis/summarize.py},
+Code, configurations, per-run summaries, the raw-data validator and the analysis scripts that generate every figure, table and number in this paper (\texttt{analysis/summarize.py},
 \texttt{final\_analysis.py}, \texttt{make\_paper\_assets.py}) are in the project repository,
-organized following ACM artifact guidelines~\cite{acmbadges}.
+organized following ACM artifact guidelines~\cite{acmbadges}. The raw request records are archived separately.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
