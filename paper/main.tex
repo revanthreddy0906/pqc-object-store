@@ -96,24 +96,22 @@ response time degrades, and can bounded session amortization of ML-KEM move that
 
 The \textbf{key contributions} of this work are as follows:
 \begin{enumerate}
-\item We design a client-side envelope-encryption layer for S3-compatible stores with six
-interchangeable key-establishment modes on one data path, chunked authenticated encryption
+\item We design a client-side envelope-encryption layer for S3-compatible stores with seven interchangeable key-establishment modes on one data path, chunked authenticated encryption
 bound to the object's identity, and a commit protocol that never exposes partial uploads
-(\S\ref{sec:design}).
+(Section~\ref{sec:design}).
 \item We implement it, together with a measurement harness that decomposes every request into
 key establishment, key derivation, encryption, metadata and storage time, samples client and
 server resources, and refuses inconsistent data; and we automate a two-host cloud testbed
-(\S\ref{sec:impl}).
+(Section~\ref{sec:impl}).
 \item We report a measurement of \TotalRuns{} runs with five randomized repetitions per
 configuration, paired within-batch comparisons and explicit equivalence tests, covering
-handshake overhead, throughput, CPU and memory (\S\ref{sec:results}).
+handshake overhead, throughput, CPU and memory (Section~\ref{sec:results}).
 \item We evaluate bounded session amortization of ML-KEM, including a variant whose bound follows
 client utilization, and test an M/M/c model against open-loop measurements.
 \end{enumerate}
 
 Our \textbf{key findings} are:
-(i) ML-KEM-768 costs \HsPutPone\,ms per PUT and \HsGetPone\,ms per GET, less than X25519 on PUT
-and \HsRoneOverPoneGet$\times$ less than RSA-4096 decryption on GET;
+(i) ML-KEM-768 costs \HsPutPone\,ms per PUT and \HsGetPone\,ms per GET, less than X25519 on PUT and about \HsRoneOverPoneGet{} times cheaper than RSA-4096 decryption on GET;
 (ii) its throughput is equivalent to X25519 within $\pm$5\,\% in \HoneEquiv{} of \HoneCells{}
 comparisons, because every workload is limited by the network, the storage server or the client
 CPU, not by the KEM;
@@ -126,7 +124,7 @@ load-independent service time does not predict.
 
 \textbf{Scope.} We do not evaluate the security of ML-KEM itself, side channels of the
 implementation, or transport security, which we hold constant. Bounded key reuse is established
-practice (\S\ref{sec:related}); our claim for session amortization is its application to ML-KEM
+practice (Section~\ref{sec:related}); our claim for session amortization is its application to ML-KEM
 roots, its quantified trade-off, and the queue-aware variant as a candidate policy.
 
 \textbf{Organization.} Section~\ref{sec:background} gives background and
@@ -218,7 +216,7 @@ from a pre-shared 32-byte key and is the symmetric-only floor; R1 transports a r
 secret with RSA-OAEP-4096; B2 uses ephemeral-static X25519; P1 uses ML-KEM-768; P2 is a hybrid
 that stores the ML-KEM ciphertext followed by the X25519 ephemeral key and feeds both 32-byte
 secrets to HKDF; and N1 amortizes one ML-KEM encapsulation over a bounded session
-(\S\ref{sec:n1design}). A reader must name the mode it expects, so a planted plaintext object
+(Section~\ref{sec:n1design}). A reader must name the mode it expects, so a planted plaintext object
 cannot downgrade P1.
 
 \begin{table}[t]
@@ -288,11 +286,12 @@ exists, so an interrupted upload is never visible.
 
 \subsection{Bounded Sessions (Mode N1)}\label{sec:n1design}
 In N1 one encapsulation yields a root $S_r$, and object $i$ of the session uses
-$K_i=\mathrm{HKDF}(S_r,\mathit{salt}_i,\text{``pqc-s3-session-v1''}\|0\|\mathit{ctx}_i)$, with the
-session identifier, the object's sequence number and the bound authenticated in $\mathit{ctx}_i$.
+\[K_i=\mathrm{HKDF}(S_r,\mathit{salt}_i,\text{``pqc-s3-session-v1''}\|0\|\mathit{ctx}_i),\]
+with the session identifier, the object's sequence number and the bound authenticated in $\mathit{ctx}_i$.
 Every object still stores the session's ML-KEM ciphertext, so it can be decrypted alone. A root
 protects at most $B$ objects and lives at most $T_{\max}$ seconds. In the queue-aware variant,
-$B_t=\mathrm{clip}(B_{\min},B_{\max},\mathrm{round}(B_{\min}+(B_{\max}-B_{\min})\hat\rho))$, where
+\[B_t=\mathrm{clip}\bigl(B_{\min},B_{\max},\mathrm{round}(B_{\min}+(B_{\max}-B_{\min})\hat\rho)\bigr),\]
+where
 $\hat\rho$ is an exponentially weighted moving average ($\alpha=0.2$) of the fraction of a client process's worker threads with a request in flight: under light load a root is used for fewer
 objects. $B_t$ is fixed per session, so $B_{\max}$ and $T_{\max}$ are hard caps. A leaked root
 exposes at most $B_{\max}$ objects; compromise of the recipient's decapsulation key exposes all
@@ -310,20 +309,22 @@ harness and analysis are written in Python~\PythonVersion; in total the project 
 \begin{tikzpicture}[
   font=\footnotesize,
   box/.style={draw, rounded corners=2pt, align=center, minimum height=0.62cm, inner sep=3pt, fill=white},
-  layer/.style={box, minimum width=5.3cm},
-  side/.style={box, minimum width=2.4cm, fill=green!6},
-  srv/.style={box, minimum width=3.0cm},
-  ana/.style={box, minimum width=2.7cm, fill=gray!8},
+  layer/.style={box, text width=5.7cm},
+  side/.style={box, text width=2.3cm, fill=green!6},
+  lib/.style={box, text width=2.55cm},
+  srv/.style={box, text width=3.1cm},
+  ana/.style={box, text width=2.8cm, fill=gray!8},
   host/.style={draw, rounded corners=4pt, dashed, inner sep=6pt},
+  lbl/.style={font=\scriptsize, fill=white, inner sep=1pt},
   arr/.style={-{Latex[length=2mm]}, thick},
   node distance=0.22cm and 0.5cm]
-% client stack
-\node[layer, fill=blue!6] (runner) {Benchmark runner: $\min(N,16)$ processes, $N$ threads\\closed loop or Poisson open loop, start barrier};
-\node[layer, below=of runner] (store) {Encrypted object store\\commit protocol, versions, streaming 8\,MiB parts};
-\node[layer, below=of store, fill=orange!8] (env) {Envelope: key establishment $\rightarrow$ HKDF\\$\rightarrow$ chunked AES-256-GCM};
-\node[box, below=of env, xshift=-1.3cm, minimum width=2.3cm] (oqs) {liboqs \LiboqsVersion\\(ML-KEM only)};
-\node[box, below=of env, xshift=1.3cm, minimum width=2.3cm] (pyca) {pyca/cryptography\\(RSA, X25519, AES)};
-\node[layer, below=of oqs.south -| env.south, anchor=north] (sdk) {MinIO SDK \MinioPyVersion{}, HTTP without retries};
+% ---------------- client stack
+\node[layer, fill=blue!6] (runner) {Benchmark runner: $N$ threads in $\min(N,16)$ processes\\closed or Poisson open loop, common start};
+\node[layer, below=of runner] (store) {Encrypted object store: commit protocol,\\versions, streaming 8\,MiB parts};
+\node[layer, below=of store, fill=orange!8] (env) {Envelope: key establishment $\rightarrow$ HKDF-SHA256\\$\rightarrow$ chunked AES-256-GCM};
+\node[lib, below=of env.south west, anchor=north west] (oqs) {liboqs \LiboqsVersion\\(ML-KEM only)};
+\node[lib, below=of env.south east, anchor=north east] (pyca) {pyca/cryptography\\(RSA, X25519, AES)};
+\node[layer, below=of oqs.south west, anchor=north west] (sdk) {MinIO SDK \MinioPyVersion, HTTP without retries};
 \node[side, left=of runner] (rec) {per-request records\\(stage timers,\\thread CPU)};
 \node[side, left=of env] (csamp) {client sampler\\(psutil, 1\,Hz)};
 \node[host, fit=(runner)(sdk)(rec)(csamp), label={[font=\footnotesize\bfseries]above:Client (\ClientType)}] (client) {};
@@ -334,18 +335,22 @@ harness and analysis are written in Python~\PythonVersion; in total the project 
 \draw[arr] (oqs) -- (oqs |- sdk.north);
 \draw[arr] (pyca) -- (pyca |- sdk.north);
 \draw[arr] (runner) -- (rec);
-% server, aligned with the client layers it talks to
-\node[srv] (metrics) at ($(runner.east)+(4.1cm,0)$) {Prometheus metrics endpoint};
-\node[srv, fill=orange!8] (minio) at ($(sdk.east)+(4.1cm,0)$) {MinIO, single node\\Docker, host networking};
+% ---------------- server: placed a fixed gap to the right of the client frame
+\node[srv, anchor=west] (metrics) at ($(client.east |- runner)+(3.0cm,0)$) {Prometheus\\metrics endpoint};
+\node[srv, anchor=west, fill=orange!8] (minio) at ($(client.east |- sdk)+(3.0cm,0)$) {MinIO, single node,\\Docker, host networking};
 \node[srv, above=of minio] (nvme) {local NVMe (XFS)};
 \node[host, fit=(metrics)(minio)(nvme), label={[font=\footnotesize\bfseries]above:Server (\ServerType)}] (server) {};
-\draw[arr, <->] (sdk.east) -- node[below, font=\scriptsize]{S3 PUT/GET} node[above, font=\scriptsize]{\LinkGbit\,Gbit/s} (minio.west);
-\draw[arr] (metrics.west) -- node[above, font=\scriptsize]{server sampler} (runner.east);
+\draw[arr, <->] (sdk.east) -- (minio.west);
+\draw[arr] (metrics.west) -- (runner.east);
+% labels sit in the gap between the two frames, clear of the dashed borders
+\node[lbl, above=1pt] at ($(client.east |- sdk)!0.5!(server.west |- minio)$) {S3 PUT/GET};
+\node[lbl, below=1pt] at ($(client.east |- sdk)!0.5!(server.west |- minio)$) {\LinkGbit\,Gbit/s};
+\node[lbl, above=1pt] at ($(client.east |- runner)!0.5!(server.west |- metrics)$) {server sampler};
 \draw[arr] (minio) -- (nvme);
-% analysis pipeline
-\node[ana] (val) at ($(metrics.east)+(2.2cm,0)$) {validator (checksums,\\schema, timers, sessions)};
+% ---------------- analysis pipeline
+\node[ana, anchor=west] (val) at ($(server.east |- metrics)+(0.9cm,0)$) {validator: checksums,\\schema, timers, sessions};
 \node[ana, below=of val] (sum) {per-run summaries};
-\node[ana, below=of sum] (stat) {statistics (paired\\$t$-intervals, M/M/c)};
+\node[ana, below=of sum] (stat) {statistics: paired\\$t$-intervals, M/M/c};
 \node[ana, below=of stat] (paper) {figures, tables,\\\LaTeX{} macros};
 \node[host, fit=(val)(paper), label={[font=\footnotesize\bfseries]above:Analysis}] (ana) {};
 \draw[arr] (val) -- (sum); \draw[arr] (sum) -- (stat); \draw[arr] (stat) -- (paper);
@@ -688,7 +693,7 @@ response time collapses well before nominal saturation, so provisioning should t
 rather than the peak throughput.
 
 \section{Threats to Validity}\label{sec:threats}
-\textbf{Internal validity.} The pause between runs failed in batches A--C (\S\ref{sec:method});
+\textbf{Internal validity.} The pause between runs failed in batches A--C (Section~\ref{sec:method});
 batch D repeated the affected cells with a working pause, but \NoisyD{} of its \CellsD{} cells
 still exceed 5\,\% variation. Absolute small-object throughput differed by up to
 \BatchDriftPct\,\% between batches, so all comparisons are within one batch. Stage timers above

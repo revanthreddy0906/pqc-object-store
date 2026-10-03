@@ -177,8 +177,10 @@ def fig_size(table: dict, out: Path) -> None:
         ax.set_title(f"{op.upper()}, 1 worker (batch B)", fontsize=7.5)
         ax.set_xlabel("object size (MiB)")
     axes[0].set_ylabel("median latency (ms)")
-    axes[1].legend(fontsize=6, loc="upper left")
+    handles, labels = axes[0].get_legend_handles_labels()
     fig.tight_layout()
+    fig.legend(handles, labels, fontsize=5.5, loc="upper center", ncol=3,
+               bbox_to_anchor=(0.5, 0.0))
     fig.savefig(out / "fig-size.pdf")
     plt.close(fig)
 
@@ -463,7 +465,7 @@ def main() -> None:
                      f"{num(min(rs), 3)}--{num(max(rs), 3)}"])
     tex_table(args.out / "tab-h1.tex",
               ["Batch", "Op", "Sizes", "Workers", "Eq./Inc./Diff.", "P1/B2 throughput"],
-              rows, "llp{1.5cm}p{1.3cm}cc")
+              rows, "llp{1.4cm}p{1.9cm}cc")
 
     # H2: ML-KEM share of request time, P1, batch B, one worker.
     for op in ("put", "get"):
@@ -588,7 +590,7 @@ def main() -> None:
         m.add(f"QaPninetyHi{word}", num(p99[2], 2))
         m.add(f"QaRate{word}", num(rate))
     sat_aware = must(table, "C", "put", 1024, 128, "N1", 100, loop="open", rate=6000.0, aware=True)
-    m.add("QaBoundSat", num(sat_aware["mean_session_bound"], 1))
+    m.add("QaBoundSat", num(sat_aware["mean_session_bound"], 0))
 
     # RQ3: queueing.
     words_size = {1024: "Small", 65536: "Mid"}
