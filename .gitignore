@@ -33,3 +33,6 @@ paper/*.out
 # AWS testbed state (instance ids, IPs)
 infra/aws/state.env
 experiments/*.log
+
+# compiled paper (rebuild with: cd paper && tectonic -X compile main.tex)
+paper/main.pdf
