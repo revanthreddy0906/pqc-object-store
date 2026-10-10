@@ -1,0 +1,36 @@
+# Revision batch F: hybrid matrix (exploratory). X25519, ML-KEM-768, the study-specific
+# hybrid P2 and X-Wing (P3) over object size and concurrency, PUT and GET. Cells already in
+# batches E/EK are not repeated here.
+experiment_id: final-f
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 5
+min_measured_ops: 10
+get_objects: 8
+seed: 20261013
+blocks:
+  - sizes: [1024]
+    concurrency: [1, 32, 128]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]
+  - sizes: [65536]
+    concurrency: [1]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]
+  - sizes: [65536]
+    concurrency: [32]
+    operations: [get]
+    modes: [B2, P1, P2, P3]
+  - sizes: [1048576, 16777216]
+    concurrency: [1, 128]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]
+  - sizes: [134217728]          # one large-object point
+    concurrency: [1]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]

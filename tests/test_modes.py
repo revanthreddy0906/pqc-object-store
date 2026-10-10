@@ -45,7 +45,7 @@ def test_round_trip(keys, identity, mode, size):
 
 
 @pytest.mark.parametrize("mode,ke_ct_bytes", [
-    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("P1", 1088), ("P2", 1120),
+    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("P1", 1088), ("P2", 1120), ("P3", 1120),
 ])
 def test_key_establishment_ciphertext_sizes(keys, identity, mode, ke_ct_bytes):
     manifest, _ = encrypt_bytes(keys[0], identity, b"x", CHUNK, mode,
@@ -94,7 +94,7 @@ def test_identity_binding(keys, identity, mode):
         decrypt_bytes(private, manifest, stored, elsewhere, mode=mode)
 
 
-@pytest.mark.parametrize("planted", ["B0", "B1", "B2", "R1", "P2"])
+@pytest.mark.parametrize("planted", ["B0", "B1", "B2", "R1", "P2", "P3"])
 def test_mode_downgrade_is_rejected(keys, identity, planted):
     """A reader expecting P1 must refuse any other mode's object, above all plaintext B0."""
     public, private = keys

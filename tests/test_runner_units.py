@@ -149,6 +149,82 @@ def test_settle_disabled_or_metric_missing(monkeypatch):
     assert slept == [30.0]  # no disk-write metric: the whole pause is taken
 
 
+def test_settle_waits_for_host_writeback_when_node_metrics_exist(monkeypatch):
+    from pqcstore.benchmark import runner, samplers
+
+    mib = 2**20
+    # (disk bytes written, dirty, write-back): still flushing, then quiet for two samples.
+    states = iter([(0, 900 * mib, 0), (300 * mib, 500 * mib, 50 * mib), (600 * mib, 4 * mib, 0),
+                   (600 * mib, 3 * mib, 0), (600 * mib, 3 * mib, 0), (600 * mib, 3 * mib, 0)])
+
+    def node(url):
+        written, dirty, writeback = next(states)
+        return {"disk_written_bytes": written, "dirty_bytes": dirty, "writeback_bytes": writeback}
+
+    monkeypatch.setattr(samplers, "scrape_node", node)
+    monkeypatch.setattr(samplers, "scrape_minio", lambda url: {})
+    slept = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    runner.settle("http://x", max_s=60, node_url="http://node")
+    assert len(slept) == 4          # left after two calm seconds, not after the full pause
+    assert next(states)[1] == 3 * mib
+
+
+def test_settle_falls_back_when_node_exporter_is_down(monkeypatch):
+    from pqcstore.benchmark import runner, samplers
+
+    def down(url):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(samplers, "scrape_node", down)
+    monkeypatch.setattr(samplers, "scrape_minio", lambda url: {})
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 100.0)
+    slept = []
+    monkeypatch.setattr(runner.time, "sleep", slept.append)
+    runner.settle("http://x", max_s=40, node_url="http://node")
+    assert slept == [40.0]          # no metric at all: the full pause
+
+
+def test_scrape_node_sums_real_disks_only(monkeypatch):
+    from pqcstore.benchmark import samplers
+
+    text = b"""# HELP node_memory_Dirty_bytes x
+node_memory_Dirty_bytes 1.5e+06
+node_memory_Writeback_bytes 0
+node_disk_written_bytes_total{device="nvme0n1"} 100
+node_disk_written_bytes_total{device="nvme1n1"} 250
+node_disk_written_bytes_total{device="loop0"} 999
+node_disk_io_now{device="nvme1n1"} 3
+node_cpu_seconds_total{cpu="0",mode="iowait"} 1.25
+node_cpu_seconds_total{cpu="1",mode="iowait"} 0.75
+node_cpu_seconds_total{cpu="0",mode="user"} 50
+node_pressure_io_waiting_seconds_total 0.5
+"""
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def read(self): return text
+
+    monkeypatch.setattr(samplers.urllib.request, "urlopen", lambda url, timeout: Response())
+    values = samplers.scrape_node("http://node")
+    assert values == {"dirty_bytes": 1.5e6, "writeback_bytes": 0.0, "disk_written_bytes": 350.0,
+                      "disk_io_now": 3.0, "cpu_iowait_s": 2.0, "io_pressure_s": 0.5}
+
+
+def test_session_lifetimes_expand_and_label(tmp_path):
+    path = tmp_path / "c.yaml"
+    path.write_text(yaml.safe_dump({
+        "experiment_id": "t", "blocks": [{
+            "sizes": [1024], "concurrency": [32], "operations": ["put"], "modes": ["P1", "N1"],
+            "session_bmax": [10, 100], "session_tmax_s": [1, 60]}]}))
+    (block,) = ExperimentConfig.load(path).cells()
+    labels = [c.label() for c in block]
+    assert labels == ["P1-put-1024-c32", "N1b10t1-put-1024-c32", "N1b10-put-1024-c32",
+                      "N1b100t1-put-1024-c32", "N1b100-put-1024-c32"]
+    assert {c.session_tmax_s for c in block if c.mode == "N1"} == {1.0, 60.0}
+
+
 def test_plan_counts_runs_and_cost(tmp_path):
     from pqcstore.benchmark.runner import plan_experiment
 

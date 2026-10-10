@@ -7,7 +7,8 @@
 #   infra/aws/pqc-aws.sh provision   copy the repo to both VMs and install everything
 #   infra/aws/pqc-aws.sh update      push newly committed code (fast; keeps builds and data)
 #   infra/aws/pqc-aws.sh baseline    network (iperf3) and disk (fio) baselines
-#   infra/aws/pqc-aws.sh run CONFIG  start an experiment on the client in tmux (survives logout)
+#   infra/aws/pqc-aws.sh run CONFIG...  start experiment(s), in order, on the client in tmux (survives logout)
+#   infra/aws/pqc-aws.sh profile CYCLES [SECONDS]  profile MinIO and the disk on the server (in tmux)
 #   infra/aws/pqc-aws.sh logs        follow the running experiment
 #   infra/aws/pqc-aws.sh fetch       copy experiments/ back to this laptop
 #   infra/aws/pqc-aws.sh ssh client|server
@@ -22,6 +23,7 @@ source "$HERE/config.env"
 STATE="$HERE/state.env"          # git-ignored: instance ids and IPs
 KEY_FILE="$HOME/.ssh/${KEY_NAME}.pem"
 AWS=(aws --region "$REGION" --output text)
+[[ -n "${PROFILE:-}" ]] && AWS+=(--profile "$PROFILE")   # a named AWS CLI profile (config.env)
 SSH_OPTS=(-i "$KEY_FILE" -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 TAGS="{Key=Project,Value=$PROJECT_TAG}"
 
@@ -39,26 +41,32 @@ public_ip() {
 }
 remote() { local host=$1; shift; ssh "${SSH_OPTS[@]}" "ubuntu@$host" "$@"; }
 
-ubuntu_ami() {
+arch_of() {  # instance type -> amd64 | arm64
+  local arch; arch="$("${AWS[@]}" ec2 describe-instance-types --instance-types "$1" \
+    --query 'InstanceTypes[0].ProcessorInfo.SupportedArchitectures[0]')"
+  [[ "$arch" == arm64 ]] && echo arm64 || echo amd64
+}
+
+ubuntu_ami() {  # [amd64|arm64]
   "${AWS[@]}" ec2 describe-images --owners 099720109477 \
-    --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+    --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-${1:-amd64}-server-*" \
               "Name=state,Values=available" \
     --query 'sort_by(Images,&CreationDate)[-1].ImageId'
 }
 
 cmd_check() {
   command -v aws >/dev/null || die "aws CLI not found (brew install awscli)"
-  echo "identity : $(aws sts get-caller-identity --query Arn --output text)"
+  echo "identity : $("${AWS[@]}" sts get-caller-identity --query Arn)"
   echo "region   : $REGION ($AZ)"
   local quota need
   quota="$("${AWS[@]}" service-quotas get-service-quota --service-code ec2 \
     --quota-code L-1216C47A --query 'Quota.Value' 2>/dev/null || echo unknown)"
-  need=24
+  need=32
   echo "vCPU quota (On-Demand Standard): $quota, needed $need"
   echo "offered types: $("${AWS[@]}" ec2 describe-instance-type-offerings --location-type availability-zone \
     --filters "Name=location,Values=$AZ" "Name=instance-type,Values=$CLIENT_TYPE,$SERVER_TYPE" \
     --query 'InstanceTypeOfferings[].InstanceType')"
-  echo "ubuntu AMI : $(ubuntu_ami)"
+  echo "ubuntu AMI : client $(ubuntu_ami "$(arch_of "$CLIENT_TYPE")"), server $(ubuntu_ami "$(arch_of "$SERVER_TYPE")")"
   [[ -f "$STATE" ]] && echo "state.env exists: a testbed is already recorded (see status)"
   return 0
 }
@@ -66,9 +74,11 @@ cmd_check() {
 cmd_up() {
   [[ -f "$STATE" ]] && die "state.env exists: a testbed is already up (use status or destroy)"
   command -v aws >/dev/null || die "aws CLI not found"
-  local my_ip ami vpc subnet sg
+  local my_ip client_ami server_ami vpc subnet sg
   my_ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
-  ami="$(ubuntu_ami)"; [[ "$ami" == ami-* ]] || die "could not find the Ubuntu 24.04 AMI"
+  client_ami="$(ubuntu_ami "$(arch_of "$CLIENT_TYPE")")"   # the client may be ARM (Graviton)
+  server_ami="$(ubuntu_ami "$(arch_of "$SERVER_TYPE")")"
+  [[ "$client_ami" == ami-* && "$server_ami" == ami-* ]] || die "could not find the Ubuntu 24.04 AMIs"
   vpc="$("${AWS[@]}" ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId')"
   [[ "$vpc" == vpc-* ]] || die "no default VPC in $REGION"
   subnet="$("${AWS[@]}" ec2 describe-subnets --filters "Name=vpc-id,Values=$vpc" \
@@ -77,7 +87,7 @@ cmd_up() {
 
   local data_desc="instance-store NVMe"; (( DATA_GB > 0 )) && data_desc="${DATA_GB} GB gp3"
   echo "Creating in $REGION ($AZ): $CLIENT_TYPE client + $SERVER_TYPE server (MinIO data: $data_desc)"
-  echo "Ubuntu AMI $ami; SSH allowed only from $my_ip; ~\$${HOURLY_USD}/h while running"
+  echo "Ubuntu AMIs $client_ami (client), $server_ami (server); SSH allowed only from $my_ip; ~\$${HOURLY_USD}/h while running"
   : > "$STATE"
   save_state REGION "$REGION" AZ "$AZ"
 
@@ -109,8 +119,8 @@ cmd_up() {
     pg_args=(--placement "GroupName=$PROJECT_TAG-pg")
   fi
 
-  launch() {  # role type root_gb [extra block-device json]
-    local role=$1 type=$2 root_gb=$3 extra=${4:-}
+  launch() {  # role type ami root_gb [extra block-device json]
+    local role=$1 type=$2 ami=$3 root_gb=$4 extra=${5:-}
     local bdm="[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":$root_gb,\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}$extra]"
     "${AWS[@]}" ec2 run-instances --image-id "$ami" --instance-type "$type" --count 1 \
       --key-name "$KEY_NAME" --subnet-id "$subnet" --security-group-ids "$sg" \
@@ -126,8 +136,8 @@ cmd_up() {
     data_disk=",{\"DeviceName\":\"/dev/sdf\",\"Ebs\":{\"VolumeSize\":$DATA_GB,\"VolumeType\":\"gp3\",\"Iops\":$DATA_IOPS,\"Throughput\":$DATA_MBPS,\"DeleteOnTermination\":true}}"
   fi
   local server client
-  server="$(launch server "$SERVER_TYPE" 30 "$data_disk")"; save_state SERVER_ID "$server"
-  client="$(launch client "$CLIENT_TYPE" 60)";              save_state CLIENT_ID "$client"
+  server="$(launch server "$SERVER_TYPE" "$server_ami" 30 "$data_disk")"; save_state SERVER_ID "$server"
+  client="$(launch client "$CLIENT_TYPE" "$client_ami" 60)";              save_state CLIENT_ID "$client"
   echo "Waiting for both instances to run..."
   "${AWS[@]}" ec2 wait instance-running --instance-ids "$server" "$client"
   save_state SERVER_PRIVATE_IP "$("${AWS[@]}" ec2 describe-instances --instance-ids "$server" \
@@ -199,11 +209,21 @@ cmd_baseline() {
 
 cmd_run() {
   load_state
-  local config=${1:?usage: $0 run config/pilot.yaml}
+  (( $# )) || die "usage: $0 run config/final-e.yaml [more configs, run in order]"
+  local config
+  for config in "$@"; do [[ -f "$REPO/$config" ]] || die "no such config: $config"; done
   remote "$(public_ip "$CLIENT_ID")" "cd pqc && mkdir -p experiments && tmux new-session -d -s bench \
-    'bash scripts/setup_vm.sh run $config $SERVER_PRIVATE_IP 2>&1 | tee -a experiments/bench.log'"
-  echo "Started $config in tmux session 'bench' on the client. Follow with: $0 logs"
-  echo "The client stops itself 10 minutes after the experiment ends; the server after 60 idle minutes."
+    'bash scripts/setup_vm.sh run $SERVER_PRIVATE_IP $* 2>&1 | tee -a experiments/bench.log'"
+  echo "Started $* in tmux session 'bench' on the client. Follow with: $0 logs"
+  echo "The client stops itself 10 minutes after the last experiment ends; the server after 60 idle minutes."
+}
+
+cmd_profile() {  # sample MinIO and the disk on the server while a workload runs
+  load_state
+  local cycles=${1:?usage: $0 profile CYCLES [SECONDS]} secs=${2:-45}
+  remote "$(public_ip "$SERVER_ID")" "cd pqc && mkdir -p experiments && tmux new-session -d -s profile \
+    'bash scripts/setup_vm.sh profile $cycles $secs 2>&1 | tee -a experiments/profile.log'"
+  echo "Profiling on the server: $cycles cycles of 2 x $secs s (results arrive with: $0 fetch)"
 }
 
 cmd_logs() { load_state; remote "$(public_ip "$CLIENT_ID")" "tail -n 50 -f pqc/experiments/bench.log"; }
@@ -213,6 +233,13 @@ cmd_fetch() {
   mkdir -p "$REPO/experiments"
   rsync -az -e "ssh ${SSH_OPTS[*]}" \
     "ubuntu@$(public_ip "$CLIENT_ID"):pqc/experiments/" "$REPO/experiments/"
+  # Server-side profiles, if any (the server may already have stopped itself: not an error).
+  local server_ip; server_ip="$("${AWS[@]}" ec2 describe-instances --instance-ids "$SERVER_ID" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress')"
+  if [[ "$server_ip" != None && -n "$server_ip" ]]; then
+    rsync -az -e "ssh ${SSH_OPTS[*]}" "ubuntu@$server_ip:pqc/experiments/profiles" \
+      "$REPO/experiments/" 2>/dev/null || true
+  fi
   echo "Copied into experiments/. Validate with: make validate-results RUN=experiments/<id>/<stamp>"
 }
 
@@ -253,9 +280,10 @@ main() {
     check) cmd_check ;; up) cmd_up ;; provision) cmd_provision ;; update) cmd_update ;;
     baseline) cmd_baseline ;;
     run) shift; cmd_run "$@" ;; logs) cmd_logs ;; fetch) cmd_fetch ;;
+    profile) shift; cmd_profile "$@" ;;
     ssh) shift; cmd_ssh "$@" ;; status) cmd_status ;;
     stop) cmd_stop ;; start) cmd_start ;; destroy) cmd_destroy ;;
-    *) sed -n '2,18p' "$0"; exit 1 ;;
+    *) sed -n '2,19p' "$0"; exit 1 ;;
   esac
 }
 

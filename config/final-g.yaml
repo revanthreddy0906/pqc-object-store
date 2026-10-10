@@ -1,0 +1,39 @@
+# Revision batch G: session amortization trade-off. Object bound B_max x lifetime T_max for
+# N1 against per-object ML-KEM (P1): performance next to the exposure of one session root.
+# T_max = 1 s binds before B_max = 1000 fills, so observed KEM operations per object differ
+# from 1/B_max there.
+experiment_id: final-g
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 5
+get_objects: 32
+seed: 20261014
+blocks:
+  - sizes: [1024]
+    concurrency: [32]
+    operations: [put]
+    modes: [P1, N1]
+    session_bmax: [1, 10, 100, 1000]
+    session_tmax_s: [1, 10, 60]
+    queue_aware: [false]
+  - sizes: [65536]
+    concurrency: [32]
+    operations: [get]
+    modes: [P1, N1]
+    session_bmax: [1, 10, 100, 1000]
+    session_tmax_s: [1, 10, 60]
+    queue_aware: [false]
+  - loop: open                        # light load: lifetimes bind, sessions do not fill
+    sizes: [1024]
+    rates: [1500]
+    threads: 128
+    operations: [put]
+    modes: [P1, N1]
+    session_bmax: [1, 10, 100, 1000]
+    session_tmax_s: [1, 10, 60]
+    queue_aware: [false]

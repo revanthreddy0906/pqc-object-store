@@ -1,0 +1,30 @@
+# Revision batch I: batch E's primary cells with an ARM client (c7g.4xlarge, Graviton3) and
+# the same i4i.4xlarge MinIO server: a second client architecture (SoT v1.8).
+experiment_id: final-i
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 10
+get_objects: 32
+seed: 20261011
+blocks:
+  - sizes: [65536]
+    concurrency: [128, 500]
+    operations: [get]
+    modes: [B2, P1, P3]
+  - sizes: [65536]
+    concurrency: [128]
+    operations: [put]
+    modes: [B2, P1, P3]
+  - sizes: [1048576]
+    concurrency: [32]
+    operations: [put, get]
+    modes: [B2, P1, P3]
+  - sizes: [16777216]
+    concurrency: [32]
+    operations: [put, get]
+    modes: [B2, P1, P3]

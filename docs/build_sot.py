@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.7 · 1 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.8 · 10 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.7 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.8 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -354,6 +354,41 @@ T([["Version", "Date", "Change", "Status"],
                          "settle_max_s. Batch D (config/final-d.yaml: 52 small-object PUT cells, "
                          "260 runs, 40 s pause, about 5 h and $12) re-measures the noisy cells; "
                          "its cells are compared only with each other.",
+    "Pending team review (§1.3)"],
+   ["1.8", "10 Oct 2026", "PRE-REGISTRATION of the revision experiments, written before any of their "
+                          "data exists (response to the revision and literature-gap report). "
+                          "(1) Primary family: the paired throughput ratio P1/B2 in 8 closed-loop cells: "
+                          "64 KiB GET at 128 and 500 workers; 64 KiB PUT at 32 (knee) and 128; 1 MiB PUT "
+                          "and GET at 32; 16 MiB PUT and GET at 32. (2) Test: paired TOST on log ratios "
+                          "with equivalence bounds [0.95, 1.05], alpha = 0.05 per test, Holm correction "
+                          "over the 8 primary p-values; the 90% interval decides, the 95% interval is "
+                          "shown for estimation. The 5% bound is the smallest effect of interest: it is "
+                          "below the capacity change that would alter provisioning, below the 13% "
+                          "between-session drift measured in batches A-D, and was the margin already "
+                          "used in v1.6. Sensitivity at 2% and 10% is reported. (3) Replication: a run "
+                          "is the experimental unit; 10 repetitions per primary cell and 20 at the knee "
+                          "cell, from the paired log-ratio SDs of batches A and D (normal-approximation "
+                          "TOST power 0.8 at alpha 0.05/8: all cells need at most 7 except the knee, "
+                          "about 19). No optional stopping. (4) Secondary, exploratory: P3/P1, P3/B2, "
+                          "P2/P1, R1/P1 on GET, and every cell outside the primary family. (5) Stall "
+                          "rule, fixed in advance and blind to the mode: a run is a stall if its server "
+                          "CPU is below 0.8x and its throughput below 0.9x of its own cell's median; "
+                          "all runs are the primary analysis, stall-excluded the sensitivity analysis. "
+                          "(6) New mode P3 = X-Wing (draft-connolly-cfrg-xwing-kem-11), verified against "
+                          "the draft's test vectors; P2 is described as a study-specific concatenation "
+                          "hybrid. (7) Pause between runs: until the server host's dirty plus write-back "
+                          "memory and disk writes are quiet (node_exporter), at most 40 s. "
+                          "(8) Queueing: open-loop rates in order of size, odd positions train the "
+                          "load-dependent model and even positions are held out; the model is compared "
+                          "with M/M/c by error on the held-out rates. (9) Sessions: B_max {1, 10, 100, "
+                          "1000} x T_max {1, 10, 60 s}; reported with observed KEM operations per "
+                          "object and the objects and bytes protected per root (median, p95, max). "
+                          "(10) Testbed: AWS ap-southeast-2 (Sydney), c7i.4xlarge client and i4i.4xlarge "
+                          "MinIO server; second client architecture c7g.4xlarge (Graviton3) with a new "
+                          "server of the same instance type. Batches E/EK (primary), F (hybrid matrix), "
+                          "G (sessions), H (queueing, ML-KEM only), P (profiling, no performance "
+                          "numbers), I/IK/I1 (ARM; I1 = one-worker cells). No native "
+                          "client: claims are limited to the evaluated Python/liboqs stack.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1117,7 +1152,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.7",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.8",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

@@ -3,6 +3,10 @@
 Client: CPU and RSS of the benchmark worker processes (psutil) plus host CPU
 and network counters. Server: MinIO's own Prometheus node metrics, scraped over
 HTTP, so the same sampler works for the dev container and a remote Linux VM.
+When a Prometheus node_exporter runs on the server host (the AWS testbed), its
+kernel counters are sampled too: dirty and write-back memory, disk writes and
+I/O time, and I/O pressure. They attribute storage bottlenecks and drive the
+pause between runs (runner.settle).
 """
 
 from __future__ import annotations
@@ -18,8 +22,12 @@ import psutil
 CLIENT_FIELDS = ["run_id", "ts_utc_ns", "proc_cpu_pct", "host_cpu_pct", "logical_cores",
                  "proc_rss_bytes", "host_mem_used_bytes", "net_tx_bytes", "net_rx_bytes",
                  "load_avg_1m"]
+NODE_FIELDS = ["dirty_bytes", "writeback_bytes", "disk_written_bytes", "disk_writes",
+               "disk_write_time_s", "disk_io_time_s", "disk_io_now", "io_pressure_s",
+               "cpu_iowait_s"]
 SERVER_FIELDS = ["run_id", "ts_utc_ns", "proc_cpu_pct", "proc_cpu_seconds", "proc_rss_bytes",
-                 "net_rx_bytes", "net_tx_bytes", "drive_free_bytes", "io_write_bytes", "scrape_ok"]
+                 "net_rx_bytes", "net_tx_bytes", "drive_free_bytes", "io_write_bytes", "scrape_ok",
+                 *NODE_FIELDS, "node_ok"]
 SERVER_METRICS = {
     "minio_process_cpu_seconds_total": "proc_cpu_seconds",
     "minio_process_resident_memory_bytes": "proc_rss_bytes",
@@ -28,6 +36,45 @@ SERVER_METRICS = {
     "minio_node_drive_free_bytes": "drive_free_bytes",
     "minio_node_io_wchar_bytes": "io_write_bytes",
 }
+
+
+# node_exporter metric -> (field, label filter); values are summed over matching series.
+_REAL_DISK = ("nvme", "xvd", "sd", "vd")
+NODE_METRICS = {
+    "node_memory_Dirty_bytes": ("dirty_bytes", None),
+    "node_memory_Writeback_bytes": ("writeback_bytes", None),
+    "node_disk_written_bytes_total": ("disk_written_bytes", "disk"),
+    "node_disk_writes_completed_total": ("disk_writes", "disk"),
+    "node_disk_write_time_seconds_total": ("disk_write_time_s", "disk"),
+    "node_disk_io_time_seconds_total": ("disk_io_time_s", "disk"),
+    "node_disk_io_now": ("disk_io_now", "disk"),
+    "node_pressure_io_waiting_seconds_total": ("io_pressure_s", None),
+    "node_cpu_seconds_total": ("cpu_iowait_s", "iowait"),
+}
+
+
+def scrape_node(node_url: str, timeout: float = 2.0) -> dict[str, float]:
+    """Kernel counters of the server host from a Prometheus node_exporter."""
+    with urllib.request.urlopen(node_url, timeout=timeout) as response:
+        text = response.read().decode("utf-8", "replace")
+    values: dict[str, float] = {}
+    for line in text.splitlines():
+        if line.startswith("#"):
+            continue
+        series, _, value = line.rpartition(" ")
+        name, _, labels = series.partition("{")
+        spec = NODE_METRICS.get(name)
+        if spec is None:
+            continue
+        field, kind = spec
+        if kind == "disk":
+            device = labels.partition('device="')[2].partition('"')[0]
+            if not device.startswith(_REAL_DISK):
+                continue
+        elif kind == "iowait" and 'mode="iowait"' not in labels:
+            continue
+        values[field] = values.get(field, 0.0) + float(value)
+    return values
 
 
 def scrape_minio(metrics_url: str, timeout: float = 2.0) -> dict[str, float]:
@@ -113,21 +160,31 @@ class ClientSampler(_Sampler):
 
 
 class ServerSampler(_Sampler):
-    def __init__(self, path: Path, metrics_url: str, interval: float = 1.0) -> None:
+    def __init__(self, path: Path, metrics_url: str, interval: float = 1.0,
+                 node_url: str | None = None) -> None:
         super().__init__(path, SERVER_FIELDS, interval)
         self._url = metrics_url
+        self._node_url = node_url
         self._last: tuple[float, float] | None = None
+
+    def _node(self) -> dict:
+        if not self._node_url:
+            return {}
+        try:
+            return {**scrape_node(self._node_url), "node_ok": 1}
+        except (OSError, ValueError):
+            return {"node_ok": 0}
 
     def sample(self) -> dict:
         now = time.monotonic()
         try:
             values = scrape_minio(self._url)
         except OSError:
-            return {"scrape_ok": 0}
+            return {"scrape_ok": 0, **self._node()}
         cpu_pct = None
         if self._last is not None and "proc_cpu_seconds" in values:
             last_time, last_cpu = self._last
             cpu_pct = round(100 * (values["proc_cpu_seconds"] - last_cpu) / (now - last_time), 1)
         if "proc_cpu_seconds" in values:
             self._last = (now, values["proc_cpu_seconds"])
-        return {**values, "proc_cpu_pct": cpu_pct, "scrape_ok": 1}
+        return {**values, "proc_cpu_pct": cpu_pct, "scrape_ok": 1, **self._node()}

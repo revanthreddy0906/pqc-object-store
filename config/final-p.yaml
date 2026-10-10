@@ -1,0 +1,19 @@
+# Revision batch P: storage-path profiling. Longer runs of small-object PUT at saturation
+# while the server is profiled (pqc-aws.sh profile). Runs that overlap an strace window are
+# slowed by the tracer: this batch attributes the bottleneck and supplies no performance numbers.
+experiment_id: final-p
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 60
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 3
+get_objects: 32
+seed: 20261016
+blocks:
+  - sizes: [1024, 65536]
+    concurrency: [128]
+    operations: [put]
+    modes: [B2, P1]

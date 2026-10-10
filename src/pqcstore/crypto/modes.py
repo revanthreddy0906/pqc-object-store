@@ -9,7 +9,8 @@ establishment alone.
     R1  RSA-OAEP-4096-SHA256  random 32-byte secret wrapped per object
     B2  X25519                ephemeral-static ECDH per object
     P1  ML-KEM-768            encapsulation per object
-    P2  X25519 + ML-KEM-768   both; IKM = S_kem || S_ecdh
+    P2  X25519 + ML-KEM-768   study-specific hybrid: IKM = S_kem || S_ecdh, combined by HKDF
+    P3  X-Wing                standards-track hybrid (draft-connolly-cfrg-xwing-kem, xwing.py)
     N1  ML-KEM-768 session    one encapsulation per bounded session root (session.py)
 
 Keys are carried as bytes so they can be passed to worker processes; parsed
@@ -28,7 +29,7 @@ from functools import lru_cache
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, x25519
 
-from pqcstore.crypto import mlkem
+from pqcstore.crypto import mlkem, xwing
 from pqcstore.crypto.chunked_aead import IntegrityError
 
 MASTER_KEY_BYTES = 32
@@ -44,6 +45,7 @@ class RecipientPublic:
     rsa: bytes | None = None         # RSA-4096 SubjectPublicKeyInfo (DER)
     x25519: bytes | None = None      # raw 32-byte public key
     master_key: bytes | None = None  # B1 is symmetric: the sender holds the key too
+    xwing: bytes | None = None       # X-Wing encapsulation key (ML-KEM-768 ek || X25519 pk)
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,7 @@ class RecipientPrivate:
     rsa: bytes | None = None         # PKCS#8 (DER)
     x25519: bytes | None = None      # raw 32-byte private key
     master_key: bytes | None = None
+    xwing: bytes | None = None       # X-Wing decapsulation key: the 32-byte seed
 
 
 def generate_recipient() -> tuple[RecipientPublic, RecipientPrivate]:
@@ -60,12 +63,14 @@ def generate_recipient() -> tuple[RecipientPublic, RecipientPrivate]:
     rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=RSA_BITS)
     x_key = x25519.X25519PrivateKey.generate()
     master = os.urandom(MASTER_KEY_BYTES)
+    xwing_public, xwing_seed = xwing.generate_keypair()
     public = RecipientPublic(
         mlkem=kem.public_key,
         rsa=rsa_key.public_key().public_bytes(serialization.Encoding.DER,
                                               serialization.PublicFormat.SubjectPublicKeyInfo),
         x25519=x_key.public_key().public_bytes_raw(),
         master_key=master,
+        xwing=xwing_public,
     )
     private = RecipientPrivate(
         mlkem=kem.private_key,
@@ -73,6 +78,7 @@ def generate_recipient() -> tuple[RecipientPublic, RecipientPrivate]:
                                   serialization.NoEncryption()),
         x25519=x_key.private_bytes_raw(),
         master_key=master,
+        xwing=xwing_seed,
     )
     return public, private
 
@@ -192,6 +198,10 @@ MODES: dict[str, Mode] = {m.name: m for m in [
          key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM") + _require(pub.x25519, "X25519")),
          establish=_hybrid_send,
          recover=_hybrid_receive),
+    Mode("P3", "X-Wing", xwing.CIPHERTEXT_BYTES, HKDF, AEAD,
+         key_id=lambda pub: _id(_require(pub.xwing, "X-Wing")),
+         establish=lambda pub: xwing.encapsulate(_require(pub.xwing, "X-Wing")),
+         recover=lambda priv, ct: xwing.decapsulate(_require(priv.xwing, "X-Wing"), ct)),
     # N1: one ML-KEM-768 root per bounded session (crypto/session.py); the envelope
     # obtains keys from a SenderSession / ReceiverSessionCache instead.
     Mode("N1", "ML-KEM-768-session", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,

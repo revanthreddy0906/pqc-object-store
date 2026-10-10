@@ -6,7 +6,8 @@
 #   setup_vm.sh client              liboqs, venv, .env pointing at the server, full test suite
 #   setup_vm.sh fio                 disk baseline on the server's MinIO data disk
 #   setup_vm.sh baseline SERVER_IP  network baseline from the client
-#   setup_vm.sh run CONFIG SERVER_IP  run an experiment, validate it, then stop this VM
+#   setup_vm.sh run SERVER_IP CONFIG...  run experiments in order, validate each, then stop this VM
+#   setup_vm.sh profile CYCLES [SECONDS]  server: profile MinIO and the disk (perf, bio latency, strace)
 #   setup_vm.sh watchdog server|client  (re)install the idle auto-stop
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -49,6 +50,18 @@ setup_server() {
     "$image" >/dev/null
   for _ in $(seq 60); do curl -fsS http://127.0.0.1:9000/minio/health/live && break; sleep 1; done
   echo "MinIO $(sudo docker exec pqc-minio minio --version | head -1)"
+
+  # Kernel counters of this host (dirty/write-back memory, disk I/O) for the client's sampler
+  # and for the pause between runs. Reachable only from the client (security group).
+  sudo docker rm -f pqc-node-exporter >/dev/null 2>&1 || true
+  sudo docker run -d --name pqc-node-exporter --restart unless-stopped --network host --pid host \
+    -v /:/host:ro,rslave quay.io/prometheus/node-exporter:v1.8.2 --path.rootfs=/host >/dev/null
+  for _ in $(seq 30); do curl -fsS http://127.0.0.1:9100/metrics 2>/dev/null | grep -q '^node_memory_Dirty_bytes' && break; sleep 1; done
+  curl -fsS http://127.0.0.1:9100/metrics | grep -c '^node_disk_written_bytes_total' \
+    | xargs -I{} echo "node_exporter up ({} disks reported)"
+  # Profiling tools for the storage-path attribution (best effort: not needed for normal runs).
+  apt_install strace sysstat bpfcc-tools "linux-tools-$(uname -r)" 2>/dev/null \
+    || echo "warning: some profiling tools could not be installed"
 
   # iperf3 server for the network baseline (reachable only from the client: security group).
   sudo tee /etc/systemd/system/iperf3-server.service >/dev/null <<'EOF'
@@ -197,9 +210,40 @@ run_baseline() {
   ping -c 20 -q "$server" | tail -1 | tee "experiments/baselines/ping-$STAMP.txt"
 }
 
+# Profile the storage path on the server while a workload runs. Each cycle is one window with
+# sampling tools (low overhead) followed by one window with strace (high overhead: the runs
+# that overlap an strace window are for attribution only, never for performance numbers).
+run_profile() {
+  local cycles=${1:?cycles} secs=${2:-45}
+  local pid out; pid="$(sudo docker inspect -f '{{.State.Pid}}' pqc-minio)"
+  out="experiments/profiles/$STAMP"; mkdir -p "$out"
+  echo "profiling MinIO pid $pid: $cycles cycles of 2 x $secs s -> $out"
+  for i in $(seq "$cycles"); do
+    local tag; tag="$(printf '%02d' "$i")"
+    echo "$(date -u +%s.%N) cycle $tag sampling start" >> "$out/windows.log"
+    cp /proc/vmstat "$out/$tag-vmstat-before.txt"; sudo cat "/proc/$pid/io" > "$out/$tag-io-before.txt"
+    cat /sys/fs/xfs/stats/stats > "$out/$tag-xfs-before.txt" 2>/dev/null || true
+    iostat -x -t 1 "$secs" > "$out/$tag-iostat.txt" 2>&1 &
+    sudo biolatency-bpfcc -D "$secs" 1 > "$out/$tag-biolatency.txt" 2>&1 &
+    sudo perf record -F 99 -g -p "$pid" -o "/tmp/perf-$tag.data" -- sleep "$secs" >/dev/null 2>&1 || true
+    wait
+    sudo perf report -i "/tmp/perf-$tag.data" --stdio --no-children --sort symbol 2>/dev/null \
+      | grep -v '^$' | head -120 > "$out/$tag-perf.txt" || true
+    sudo rm -f "/tmp/perf-$tag.data"
+    cp /proc/vmstat "$out/$tag-vmstat-after.txt"; sudo cat "/proc/$pid/io" > "$out/$tag-io-after.txt"
+    cat /sys/fs/xfs/stats/stats > "$out/$tag-xfs-after.txt" 2>/dev/null || true
+    echo "$(date -u +%s.%N) cycle $tag sampling end; strace start" >> "$out/windows.log"
+    sudo timeout -s INT "$secs" strace -c -f -p "$pid" -o "$out/$tag-strace.txt" >/dev/null 2>&1 || true
+    echo "$(date -u +%s.%N) cycle $tag strace end" >> "$out/windows.log"
+  done
+  sudo chown -R ubuntu "$out"
+  echo "profiles written to $out"
+}
+
 run_experiment() {
   local config=${1:?config} server=${2:?server ip}
   export PQC_METRICS_URL="http://$server:9000/minio/v2/metrics/node"
+  export PQC_NODE_URL="http://$server:9100/metrics"
   export PQC_GIT_COMMIT="$(cat GIT_COMMIT 2>/dev/null || echo unknown)"
   export OQS_INSTALL_PATH="$PWD/.local/liboqs"   # the Makefile sets this; direct calls must too
   # A previous run's pending auto-stop must not shut this run down.
@@ -207,8 +251,9 @@ run_experiment() {
     kill "$(cat /tmp/pqc-autostop.pid)" 2>/dev/null && echo "=== cancelled the previous run's auto-stop"
     rm -f /tmp/pqc-autostop.pid
   fi
-  echo "=== $STAMP starting $config (commit $PQC_GIT_COMMIT)"
-  local status=0 out="$HOME/pqc-bench-$STAMP.out"
+  local stamp; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  echo "=== $stamp starting $config (commit $PQC_GIT_COMMIT)"
+  local status=0 out="$HOME/pqc-bench-$stamp.out"
   set +e   # capture the benchmark's own exit code (with `|| true` it would be lost)
   .venv/bin/python -u -m pqcstore.cli bench --config "$config" 2>&1 \
     | grep -v --line-buffered "faulthandler is disabled" | tee "$out"
@@ -219,6 +264,18 @@ run_experiment() {
     .venv/bin/python -m pqcstore.cli validate "$run_dir" 2>&1 | grep -v "faulthandler" || true
   fi
   (( status == 0 )) || echo "=== bench FAILED with exit code $status (see the lines above)"
+}
+
+# Run several experiments back to back (unattended overnight batches), then stop the VM once.
+run_experiments() {
+  local server=${1:?server ip}; shift
+  (( $# )) || { echo "usage: setup_vm.sh run SERVER_IP CONFIG..."; exit 1; }
+  local config
+  for config in "$@"; do
+    [[ -f "$config" ]] || { echo "=== no such config: $config"; exit 1; }
+  done
+  for config in "$@"; do run_experiment "$config" "$server"; done
+  echo "=== all $# experiment(s) finished"
   if [[ "${NO_AUTOSTOP:-0}" != 1 ]]; then
     # A scheduled `shutdown +N` blocks new logins at once; wait in the background instead so
     # the log can still be read during the grace period. A new run cancels this.
@@ -234,6 +291,7 @@ case "$ROLE" in
   client) setup_client ;;
   fio) run_fio ;;
   baseline) run_baseline "${2:-}" ;;
-  run) run_experiment "${2:-}" "${3:-}" ;;
+  run) shift; run_experiments "$@" ;;
+  profile) run_profile "${2:-}" "${3:-45}" ;;
   *) echo "unknown role $ROLE"; exit 1 ;;
 esac

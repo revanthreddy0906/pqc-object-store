@@ -64,6 +64,8 @@ class Cell:
         mode = self.mode
         if mode == "N1":
             mode += f"{'q' if self.queue_aware else 'b'}{self.session_bmax}"
+            if self.session_tmax_s != 60:   # the default lifetime keeps the original labels
+                mode += f"t{self.session_tmax_s:g}"
         return f"{mode}-{self.operation}-{self.size}-{load}"
 
     def session_policy(self):
@@ -296,7 +298,8 @@ def _worker(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, w
 # --------------------------------------------------------------------------- orchestration
 
 def run_cell(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, run_dir: Path,
-             metrics_url: str | None, max_processes: int | None = None) -> RunOutcome:
+             metrics_url: str | None, max_processes: int | None = None,
+             node_url: str | None = None) -> RunOutcome:
     from pqcstore.benchmark.samplers import ClientSampler, ServerSampler
 
     cell = plan.cell
@@ -321,7 +324,8 @@ def run_cell(plan: RunPlan, public: RecipientPublic, private: RecipientPrivate, 
         note = "workers did not become ready"
     samplers = [ClientSampler(run_dir / "client-samples.csv", [p.pid for p in procs])]
     if metrics_url:
-        samplers.append(ServerSampler(run_dir / "server-samples.csv", metrics_url))
+        samplers.append(ServerSampler(run_dir / "server-samples.csv", metrics_url,
+                                      node_url=node_url))
     for sampler in samplers:
         sampler.run_id = plan.run_id
         sampler.start()
@@ -412,6 +416,9 @@ class ExperimentConfig:
     # kernel's dirty-page writeback (30 s) plus MinIO's delete cleanup interval (5 s).
     settle_max_s: float = 0.0
     server_metrics_url: str | None = "http://127.0.0.1:9000/minio/v2/metrics/node"
+    # Prometheus node_exporter on the storage host (AWS testbed): kernel dirty/write-back
+    # memory and disk counters, sampled per run and used by settle(). None = not available.
+    server_node_url: str | None = None
     raw: dict = field(default_factory=dict)
 
     @classmethod
@@ -422,6 +429,8 @@ class ExperimentConfig:
         # metrics URL so the same configs run locally and on the VMs.
         if os.environ.get("PQC_METRICS_URL"):
             known["server_metrics_url"] = os.environ["PQC_METRICS_URL"]
+        if os.environ.get("PQC_NODE_URL"):
+            known["server_node_url"] = os.environ["PQC_NODE_URL"]
         return cls(**known, raw=raw)
 
     def cells(self) -> list[list[Cell]]:
@@ -441,11 +450,13 @@ class ExperimentConfig:
                     if mode != "N1":
                         cells.append(base)
                         continue
-                    for bmax, aware in itertools.product(block.get("session_bmax", [100]),
-                                                         block.get("queue_aware", [False])):
+                    tmax = block.get("session_tmax_s", 60)
+                    lifetimes = tmax if isinstance(tmax, list) else [tmax]
+                    for bmax, lifetime, aware in itertools.product(
+                            block.get("session_bmax", [100]), lifetimes,
+                            block.get("queue_aware", [False])):
                         cells.append(dataclasses.replace(
-                            base, session_bmax=bmax,
-                            session_tmax_s=float(block.get("session_tmax_s", 60)),
+                            base, session_bmax=bmax, session_tmax_s=float(lifetime),
                             queue_aware=bool(aware), session_bmin=block.get("session_bmin", 1)))
                 blocks.append(cells)
         for block in blocks:
@@ -520,7 +531,8 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
     manifest: dict[str, Any] = {
         "experiment_id": config.experiment_id, "started_utc": stamp, "git_commit": commit,
         "config_hash": config_hash, "machine_id": machine_id, "environment": environment_info(),
-        "server_metrics_url": config.server_metrics_url, "seed": config.seed, "runs": [],
+        "server_metrics_url": config.server_metrics_url,
+        "server_node_url": config.server_node_url, "seed": config.seed, "runs": [],
     }
     outcomes = []
     total = config.repetitions * sum(len(b) for b in blocks)
@@ -555,7 +567,8 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
                                    config.min_measured_ops, config.pool_bytes, config.seed,
                                    commit, config_hash, machine_id, tuple(get_objects), prefix)
                     outcome = run_cell(plan, public, private, run_dir,
-                                       config.server_metrics_url, config.max_processes)
+                                       config.server_metrics_url, config.max_processes,
+                                       config.server_node_url)
                 except Exception as exc:  # noqa: BLE001 - one broken run must not end the experiment
                     outcome = RunOutcome(run_id, [], 0, 0, False,
                                          f"setup/run error: {type(exc).__name__}: {exc}"[:300])
@@ -564,7 +577,8 @@ def run_experiment(config_path: Path, out_root: Path = Path("experiments"),
                         delete_objects(config.bucket, get_objects)
                     except Exception:  # noqa: BLE001, S110 - reported later by `pqcstore gc`
                         pass
-                settled = settle(config.server_metrics_url, config.settle_max_s)
+                settled = settle(config.server_metrics_url, config.settle_max_s,
+                                 node_url=config.server_node_url)
                 outcomes.append(outcome)
                 manifest["runs"].append({**asdict(outcome), "cell": asdict(cell),
                                          "started_unix": started,
@@ -595,27 +609,45 @@ def ensure_bucket(bucket: str) -> None:
 
 
 def settle(metrics_url: str | None, max_s: float, quiet_bytes_per_s: float = 5 * 2**20,
-           quiet_seconds: int = 2) -> float:
-    """Wait until MinIO's disk writes stay below `quiet_bytes_per_s` for `quiet_seconds`
-    consecutive seconds (or `max_s` passes). Without the disk-write metric, pause for the
-    full `max_s`: a short pause let the previous run's writeback stall the next run
-    (batches A-C, SoT v1.7). Returns the seconds waited."""
+           quiet_seconds: int = 2, node_url: str | None = None,
+           quiet_dirty_bytes: float = 32 * 2**20) -> float:
+    """Pause between runs until the storage host has finished the previous run's writes
+    (or `max_s` passes). Returns the seconds waited.
+
+    With a node_exporter on the host (`node_url`), wait until dirty plus write-back memory
+    is below `quiet_dirty_bytes` and the disks write less than `quiet_bytes_per_s`, for
+    `quiet_seconds` consecutive seconds. Otherwise use MinIO's own disk-write counter, and
+    without either take the full `max_s`: a short fixed pause let the previous run's
+    write-back stall the next run (batches A-C, SoT v1.7)."""
     if not metrics_url or max_s <= 0:
         return 0.0
-    from pqcstore.benchmark.samplers import scrape_minio
+    from pqcstore.benchmark.samplers import scrape_minio, scrape_node
 
-    start = time.monotonic()
-    quiet, last = 0, None
-    while time.monotonic() - start < max_s:
+    def read() -> tuple[float, float] | None:  # (bytes written so far, bytes still to flush)
+        if node_url:
+            try:
+                node = scrape_node(node_url)
+                return (node["disk_written_bytes"],
+                        node["dirty_bytes"] + node["writeback_bytes"])
+            except (OSError, ValueError, KeyError):
+                pass
         try:
             written = scrape_minio(metrics_url).get("io_write_bytes")
         except OSError:
             written = None
-        if written is None:  # metric unavailable: fixed pause of the full length
+        return None if written is None else (written, 0.0)
+
+    start = time.monotonic()
+    quiet, last = 0, None
+    while time.monotonic() - start < max_s:
+        sample = read()
+        if sample is None:  # no usable metric: fixed pause of the full length
             time.sleep(max(0.0, max_s - (time.monotonic() - start)))
             break
+        written, pending = sample
         if last is not None:
-            quiet = quiet + 1 if written - last < quiet_bytes_per_s else 0
+            calm = written - last < quiet_bytes_per_s and pending < quiet_dirty_bytes
+            quiet = quiet + 1 if calm else 0
             if quiet >= quiet_seconds:
                 break
         last = written

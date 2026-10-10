@@ -1,0 +1,32 @@
+# Revision batch E: primary replication (SoT v1.8, pre-registered).
+# The 8 primary cells of the P1/B2 equivalence family with 10 repetitions; the knee cell
+# (64 KiB PUT at 32 workers) is in final-ek.yaml with 20. P2 and P3 (X-Wing) ride along as
+# secondary comparisons, R1 on the small-object GET cells (H3).
+experiment_id: final-e
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 10
+get_objects: 32
+seed: 20261011
+blocks:
+  - sizes: [65536]
+    concurrency: [128, 500]
+    operations: [get]
+    modes: [B2, P1, P2, P3, R1]
+  - sizes: [65536]
+    concurrency: [128]
+    operations: [put]
+    modes: [B2, P1, P2, P3]
+  - sizes: [1048576]
+    concurrency: [32]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]
+  - sizes: [16777216]
+    concurrency: [32]
+    operations: [put, get]
+    modes: [B2, P1, P2, P3]
