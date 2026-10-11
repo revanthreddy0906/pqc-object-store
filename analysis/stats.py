@@ -14,6 +14,7 @@ which is the same as the (1 - 2 alpha) confidence interval lying inside the boun
 
 from __future__ import annotations
 
+import itertools
 import math
 import statistics
 from dataclasses import dataclass
@@ -128,3 +129,52 @@ def tost_power(sd_log: float, n: int, alpha: float = 0.05, lower: float = 0.95, 
         result = paired_tost([rng.gauss(mu, sd_log) for _ in range(n)], lower, upper)
         hits += result is not None and result.p < alpha
     return hits / draws
+
+
+# ---------------------------------------------------------------- queueing
+
+def state_dependent_response(arrival_rate: float, service_rate, max_state: int = 200_000) -> float:
+    """Mean response time of a birth-death queue with Poisson arrivals at `arrival_rate`
+    and total service rate `service_rate(n)` when n requests are in the system.
+
+    The stationary distribution is p_n proportional to prod_{k<=n} arrival_rate / mu(k);
+    the mean number in system L gives W = L / arrival_rate (Little's law). Returns inf
+    when the queue is unstable (the tail does not decay). M/M/1 and M/M/c are the special
+    cases mu(n) = mu and mu(n) = min(n, c) / S.
+    """
+    if arrival_rate <= 0:
+        return float("nan")
+    log_p, log_terms, tail_ratio = 0.0, [0.0], 0.0
+    for n in range(1, max_state + 1):
+        tail_ratio = arrival_rate / service_rate(n)
+        log_p += math.log(tail_ratio)
+        log_terms.append(log_p)
+        if tail_ratio < 1 and log_p < log_terms[0] - 60 and n > 16:   # negligible mass beyond
+            break
+    else:
+        return float("inf")
+    if tail_ratio >= 1:
+        return float("inf")
+    peak = max(log_terms)
+    weights = [math.exp(v - peak) for v in log_terms]
+    total = sum(weights)
+    mean_in_system = sum(n * w for n, w in enumerate(weights)) / total
+    return mean_in_system / arrival_rate
+
+
+def interpolate_rate(points: dict[int, float]):
+    """mu(n) from measured closed-loop throughput at some concurrency levels: linear between
+    measured levels, constant beyond the largest (more waiting requests do not add capacity)."""
+    levels = sorted(points)
+
+    def mu(n: int) -> float:
+        if n <= levels[0]:
+            return points[levels[0]] * n / levels[0]
+        if n >= levels[-1]:
+            return points[levels[-1]]
+        for low, high in itertools.pairwise(levels):
+            if low <= n <= high:
+                return points[low] + (points[high] - points[low]) * (n - low) / (high - low)
+        return points[levels[-1]]
+
+    return mu

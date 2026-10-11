@@ -62,3 +62,33 @@ def test_power_grows_with_repetitions():
     low = stats.tost_power(0.035, 5, draws=1500)
     high = stats.tost_power(0.035, 20, draws=1500)
     assert low < high and high > 0.9
+
+
+def test_state_dependent_queue_reduces_to_mm1():
+    lam, mu = 60.0, 100.0
+    assert stats.state_dependent_response(lam, lambda n: mu) == pytest.approx(1 / (mu - lam), rel=1e-6)
+
+
+def test_state_dependent_queue_reduces_to_mmc():
+    lam, service, servers = 3500.0, 0.005, 25           # the paper's M/M/c setting
+    offered = lam * service
+    term, total = 1.0, 1.0                              # Erlang C by its definition
+    for k in range(1, servers):
+        term *= offered / k
+        total += term
+    last = term * offered / servers * servers / (servers - offered)
+    erlang_c = last / (total + last)
+    expected = service + erlang_c * service / (servers - offered)
+    got = stats.state_dependent_response(lam, lambda n: min(n, servers) / service)
+    assert got == pytest.approx(expected, rel=1e-6)
+
+
+def test_state_dependent_queue_is_unstable_above_capacity():
+    assert stats.state_dependent_response(120.0, lambda n: 100.0) == float("inf")
+    assert stats.state_dependent_response(100.0, lambda n: 100.0) == float("inf")
+
+
+def test_interpolated_service_rate():
+    mu = stats.interpolate_rate({1: 300.0, 32: 4000.0, 128: 4700.0})
+    assert mu(1) == 300.0 and mu(32) == 4000.0 and mu(500) == 4700.0
+    assert mu(80) == pytest.approx(4000 + 700 * 48 / 96)

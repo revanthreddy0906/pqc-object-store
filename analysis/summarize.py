@@ -42,6 +42,8 @@ class RunAcc:
         self.rotations = 0       # N1: requests that opened a new session (one ML-KEM encaps)
         self.session_reqs = 0
         self.bound_sum = 0
+        # Completions and queue wait per wall-clock second: stalls and backlog over time.
+        self.seconds: dict[int, list[float]] = {}
         # N1 exposure: objects and plaintext bytes protected by each session root, over the
         # whole run (warm-up included: a root's scope does not stop at a phase boundary).
         self.roots: dict[str, list[int]] = {}
@@ -64,6 +66,9 @@ class RunAcc:
         self.first_start = start if not self.first_start else min(self.first_start, start)
         self.last_end = max(self.last_end, start + r["total_ns"])
         self.bytes += r["object_size_bytes"]
+        second = self.seconds.setdefault((start + r["total_ns"]) // 1_000_000_000, [0, 0.0])
+        second[0] += 1
+        second[1] += r["queue_wait_ns"] / 1e6
         if r["session_id"] is not None:
             self.session_reqs += 1
             self.rotations += bool(r["session_seq"] == 0)
@@ -93,6 +98,17 @@ class RunAcc:
         row["sojourn_mean_ms"] = float(sojourn.mean())
         row["sojourn_p50_ms"] = float(np.quantile(sojourn, 0.5))
         row["sojourn_p99_ms"] = float(np.quantile(sojourn, 0.99))
+        # Per-second view (first and last partial seconds dropped): how steady was the run?
+        inner = [self.seconds[s] for s in sorted(self.seconds)][1:-1]
+        if len(inner) >= 5:
+            per_s = np.asarray([c for c, _ in inner], dtype=float)
+            wait_s = np.asarray([w / c for c, w in inner])
+            median = float(np.median(per_s))
+            row["persec_cv"] = float(per_s.std() / per_s.mean())
+            row["persec_min_ratio"] = float(per_s.min() / median) if median else float("nan")
+            row["slow_seconds"] = int((per_s < 0.5 * median).sum())
+            row["seconds"] = len(inner)
+            row["wait_persec_max_ms"] = float(wait_s.max())
         stage_total = sum(self.stage.values())
         for s in STAGES:
             row[f"{s[:-3]}_mean_ms"] = self.stage[s] / n / 1e6
