@@ -42,6 +42,14 @@ class RunAcc:
         self.rotations = 0       # N1: requests that opened a new session (one ML-KEM encaps)
         self.session_reqs = 0
         self.bound_sum = 0
+        # N1 exposure: objects and plaintext bytes protected by each session root, over the
+        # whole run (warm-up included: a root's scope does not stop at a phase boundary).
+        self.roots: dict[str, list[int]] = {}
+
+    def protect(self, r: dict) -> None:
+        root = self.roots.setdefault(r["session_id"], [0, 0])
+        root[0] += 1
+        root[1] += r["object_size_bytes"]
 
     def add(self, r: dict) -> None:
         if not r["success"]:
@@ -94,6 +102,15 @@ class RunAcc:
                                   else float("nan"))
         row["mean_session_bound"] = (self.bound_sum / self.session_reqs if self.session_reqs
                                      else float("nan"))
+        if self.roots:
+            objects = np.asarray([v[0] for v in self.roots.values()])
+            size = np.asarray([v[1] for v in self.roots.values()]) / MIB
+            row["roots"] = len(objects)
+            row["kem_per_object_observed"] = len(objects) / int(objects.sum())
+            for name, values in (("root_objects", objects), ("root_mib", size)):
+                row[f"{name}_median"] = float(np.median(values))
+                row[f"{name}_p95"] = float(np.quantile(values, 0.95))
+                row[f"{name}_max"] = float(values.max())
         return row
 
 
@@ -106,7 +123,9 @@ def scan(run_dir: Path) -> dict[str, dict]:
         lines += 1
         if lines % 10_000_000 == 0:
             print(f"  {run_dir.parent.name}: {lines:,} records", flush=True)
-        if '"phase":"measure"' not in line:   # cheap filter before parsing
+        measured = '"phase":"measure"' in line   # cheap filters before parsing
+        in_session = '"session_id":"' in line
+        if not measured and not in_session:
             continue
         r = json.loads(line)
         run_id = r["run_id"]
@@ -116,7 +135,10 @@ def scan(run_dir: Path) -> dict[str, dict]:
             if run_id in done:
                 raise ValueError(f"{run_dir}: records of {run_id} are not contiguous")
             current, acc = run_id, RunAcc()
-        acc.add(r)
+        if in_session and r["operation"] == "put" and r["success"]:
+            acc.protect(r)
+        if measured:
+            acc.add(r)
     if current is not None:
         done[current] = acc.summary()
     print(f"  {run_dir.parent.name}: {lines:,} records, {len(done)} runs", flush=True)
@@ -161,6 +183,26 @@ def sampler_stats(path: Path, kind: str, windows: dict[str, tuple[int, int]]) ->
             values = col(window, name)
             if len(values) > 1 and span > 0:
                 stats[f"{kind}_{name[:-6]}_mib_s"] = (values[-1] - values[0]) / MIB / span
+        if kind == "server" and span > 0:   # host kernel counters (node_exporter), if sampled
+            def delta(name, samples=window):
+                values = col(samples, name)
+                return values[-1] - values[0] if len(values) > 1 else float("nan")
+
+            dirty, writeback = col(window, "dirty_bytes"), col(window, "writeback_bytes")
+            if dirty:
+                writes = delta("disk_writes")
+                stats.update({
+                    "host_dirty_mean_mib": statistics.fmean(dirty) / MIB,
+                    "host_dirty_max_mib": max(dirty) / MIB,
+                    "host_writeback_max_mib": max(writeback) / MIB if writeback else float("nan"),
+                    "host_disk_write_mib_s": delta("disk_written_bytes") / MIB / span,
+                    "host_disk_writes_s": writes / span,
+                    "host_disk_write_latency_ms": (delta("disk_write_time_s") / writes * 1000
+                                                   if writes > 0 else float("nan")),
+                    "host_disk_busy": delta("disk_io_time_s") / span,
+                    "host_io_pressure": delta("io_pressure_s") / span,
+                    "host_iowait_cores": delta("cpu_iowait_s") / span,
+                })
         out[run_id] = stats
     return out
 
@@ -172,16 +214,26 @@ def summarize(run_dir: Path) -> list[dict]:
     client = sampler_stats(run_dir / "client-samples.csv", "client", windows)
     server = sampler_stats(run_dir / "server-samples.csv", "server", windows)
     rows = []
-    for run in manifest["runs"]:
+    previous, position = None, {}
+    for index, run in enumerate(manifest["runs"]):
         cell, run_id = run["cell"], run["run_id"]
+        group = run_id[:10]                       # repetition + block
+        position[group] = position.get(group, -1) + 1
+        order = {"run_index": index, "position_in_block": position[group],
+                 "previous_operation": previous["cell"]["operation"] if previous else "",
+                 "previous_mode": previous["cell"]["mode"] if previous else "",
+                 "started_unix": run.get("started_unix", float("nan")),
+                 "settle_s": run.get("settle_s", float("nan"))}
+        previous = run
         processes = max(1, min(cell["concurrency"] or 0, manifest["environment"]["logical_cores"]))
         row = {"experiment": manifest["experiment_id"], "run_id": run_id,
                "repetition": int(run_id[3:5]), "block": run_id.split("-")[1],
                "mode": cell["mode"], "operation": cell["operation"], "size": cell["size"],
                "loop": cell["loop"], "concurrency": cell["concurrency"], "rate": cell["rate"],
                "session_bmax": cell["session_bmax"], "queue_aware": cell["queue_aware"],
+               "session_tmax_s": cell.get("session_tmax_s", 0.0),
                "valid": run["valid"], "client_bound": run.get("client_bound", False),
-               "worker_processes": processes,
+               "worker_processes": processes, **order,
                **records.get(run_id, {"requests": 0}),
                **client.get(run_id, {}), **server.get(run_id, {})}
         if row.get("client_cpu_pct") == row.get("client_cpu_pct") and "client_cpu_pct" in row:

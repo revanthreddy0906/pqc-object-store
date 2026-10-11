@@ -30,8 +30,14 @@ import statistics
 from collections import defaultdict
 from pathlib import Path
 
-T95 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262}
+import stats
+
 MARGIN = 0.05
+ALPHA = 0.05
+# Pre-registered primary family (SoT v1.8): paired P1/B2 throughput in these closed-loop cells.
+PRIMARY_CELLS = [("get", 65536, 128), ("get", 65536, 500), ("put", 65536, 32), ("put", 65536, 128),
+                 ("put", 1048576, 32), ("get", 1048576, 32), ("put", 16777216, 32),
+                 ("get", 16777216, 32)]
 MIB = 1024 * 1024
 MODES = ["B0", "B1", "R1", "B2", "P1", "P2", "N1"]
 MODE_NAME = {"B0": "plaintext", "B1": "AES only (pre-shared key)", "R1": "RSA-OAEP-4096",
@@ -64,7 +70,8 @@ def load_runs(path: Path) -> list[dict]:
                 if key in NUMERIC:
                     r[key] = int(float(value)) if value not in ("", None) else 0
                 elif key not in {"experiment", "run_id", "block", "mode", "operation", "loop",
-                                 "queue_aware", "valid", "client_bound"}:
+                                 "queue_aware", "valid", "client_bound", "previous_operation",
+                                 "previous_mode"}:
                     r[key] = num(value)
             r["queue_aware"] = raw["queue_aware"] == "True"
             r["valid"] = raw["valid"] == "True"
@@ -83,7 +90,11 @@ def workload(r: dict) -> tuple:
 
 
 def cell_key(r: dict) -> tuple:
-    return (*workload(r), r["mode"], r["session_bmax"], r["queue_aware"])
+    key = (*workload(r), r["mode"], r["session_bmax"], r["queue_aware"])
+    lifetime = r.get("session_tmax_s", 0.0)
+    # Session lifetimes other than the default 60 s (batch G) are separate cells.
+    return key if r["mode"] != "N1" or lifetime in (0.0, 60.0) or math.isnan(lifetime) \
+        else (*key, lifetime)
 
 
 def flag_stalls(runs: list[dict]) -> None:
@@ -105,7 +116,8 @@ def mean_ci(values: list[float]) -> tuple[float, float, float]:
     mean = statistics.fmean(values)
     if len(values) < 2:
         return mean, float("nan"), float("nan")
-    half = T95[len(values) - 1] * statistics.stdev(values) / math.sqrt(len(values))
+    half = (stats.t_quantile(0.975, len(values) - 1) * statistics.stdev(values)
+            / math.sqrt(len(values)))
     return mean, mean - half, mean + half
 
 
@@ -192,6 +204,74 @@ def compare(table: dict, mode_a: str, mode_b: str, metrics: list[str], where) ->
 
 def closed(cell: dict) -> bool:
     return cell["loop"] == "closed"
+
+
+# ---------------------------------------------------------------- formal equivalence (TOST)
+
+def log_ratios(a: list[dict], b: list[dict], metric: str, drop_stalls: bool = False) -> list[float]:
+    by_rep = {r["repetition"]: r for r in b}
+    out = []
+    for r in a:
+        other = by_rep.get(r["repetition"])
+        if other is None or (drop_stalls and (r["stall"] or other["stall"])):
+            continue
+        if r[metric] > 0 and other[metric] > 0:
+            out.append(math.log(r[metric] / other[metric]))
+    return out
+
+
+def tost_verdict(result) -> str:
+    if result is None:
+        return "n/a"
+    if result.p < ALPHA:
+        return "equivalent"
+    if result.ci90[1] < 1 - MARGIN or result.ci90[0] > 1 + MARGIN:
+        return "different"
+    return "inconclusive"
+
+
+def tost_row(cell: dict, other: dict, metric: str = "ops_per_s") -> dict:
+    """Paired TOST of cell/other with the +-5% bounds, plus the pre-registered sensitivities."""
+    logs = log_ratios(cell["runs"], other["runs"], metric)
+    main = stats.paired_tost(logs)
+    clean = stats.paired_tost(log_ratios(cell["runs"], other["runs"], metric, True))
+    row = {k: cell[k] for k in ("experiment", "operation", "size", "loop", "concurrency", "rate")}
+    row.update({"comparison": f"{cell['mode']}/{other['mode']}", "metric": metric})
+    if main is None:
+        return {**row, "n": len(logs), "verdict": "n/a"}
+    row.update({
+        "n": main.n, "ratio": main.ratio, "sd_log": main.sd_log,
+        "ci90_lo": main.ci90[0], "ci90_hi": main.ci90[1],
+        "ci95_lo": main.ci95[0], "ci95_hi": main.ci95[1],
+        "p_lower": main.p_lower, "p_upper": main.p_upper, "p_tost": main.p,
+        "verdict": tost_verdict(main),
+        "stalled_pairs": main.n - (clean.n if clean else 0),
+        "p_tost_nostall": clean.p if clean else float("nan"),
+        "verdict_nostall": tost_verdict(clean),
+    })
+    for margin in (0.02, 0.10):
+        alt = stats.paired_tost(logs, 1 - margin, 1 + margin)
+        row[f"equivalent_at_{int(margin * 100)}pct"] = alt.p < ALPHA
+    return row
+
+
+def tost_family(table: dict, experiments: tuple[str, ...], mode_a: str = "P1", mode_b: str = "B2",
+                cells_: list[tuple] = PRIMARY_CELLS) -> list[dict]:
+    """The pre-registered family: one TOST per cell, Holm-adjusted across the family."""
+    rows = []
+    for op, size, conc in cells_:
+        for exp in experiments:
+            a = table.get((exp, op, size, "closed", conc, 0.0, mode_a, 0, False))
+            b = table.get((exp, op, size, "closed", conc, 0.0, mode_b, 0, False))
+            if a and b:
+                rows.append(tost_row(a, b))
+                break
+    tested = [r for r in rows if "p_tost" in r]
+    for r, adjusted in zip(tested, stats.holm([r["p_tost"] for r in tested])):
+        r["p_holm"] = adjusted
+        r["verdict_holm"] = ("equivalent" if adjusted < ALPHA else
+                             "different" if r["verdict"] == "different" else "inconclusive")
+    return rows
 
 
 # ---------------------------------------------------------------- bottlenecks
