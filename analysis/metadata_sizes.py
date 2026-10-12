@@ -14,7 +14,7 @@ from pathlib import Path
 
 from pqcstore.benchmark.records import iter_lines
 
-MODES = ("B0", "B1", "R1", "B2", "P1", "P2")
+MODES = ("B0", "B1", "R1", "B2", "P1", "P2", "P3")
 
 
 def main() -> None:
