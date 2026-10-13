@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.9 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.10 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.9 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.10 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -427,6 +427,31 @@ T([["Version", "Date", "Change", "Status"],
                           "Analysis: "
                           "analysis/revision_assets.py; paper restructured per the report, with "
                           "paper/response-to-review.md.",
+    "Pending team review (§1.3)"],
+   ["1.10", "13 Oct 2026", "AUDIT REVISION (Q1 audit of 13 Oct 2026); no new experiment, "
+                           "re-analysis of existing data only. (1) Saturation model: with the "
+                           "client CPU exhausted the throughput ratio of two modes equals the "
+                           "inverse ratio of client CPU per request; on 64 KiB GET at 500 "
+                           "workers it matches P1, P2, P3 to 0.9 points and R1 to 1.7 on both "
+                           "architectures; it over-predicts by 1.8-3.0 points at 128 workers "
+                           "(client not saturated). (2) One-worker stage comparison P1 minus B2, "
+                           "64 KiB GET: key establishment -2 us (x86) and -5 us (ARM), manifest "
+                           "handling +6 us, key derivation +5 us (unexplained). The client-bound "
+                           "deficit is therefore attributed to handling the larger manifest, "
+                           "NOT PROVEN: no padded-manifest control was run. (3) Corrections: the "
+                           "isolation claim of C1 is withdrawn (modes also differ in manifest "
+                           "size); knee (0.68-0.81 of peak) and stability boundary (0.75-0.82) "
+                           "are now separate quantities; 'no failed request' verified for the "
+                           "185 open-loop runs; P2 manifest 2,091 vs 2,085 B is object-size "
+                           "dependent; queueing removed as a contribution; six of eight primary "
+                           "cells stated to be network- or server-bound. (4) Added, exploratory: "
+                           "client CPU per request in the primary family, bootstrap check (15 of "
+                           "16 verdicts agree), false-discovery count for the hybrid matrix (50 "
+                           "of 66 marks). (5) HPKE (RFC 9180, draft-ietf-hpke-pq-03) discussed; "
+                           "the envelope is not HPKE-conformant and HPKE was not benchmarked. "
+                           "PENDING: padded-manifest control, native client, about 50 repetitions "
+                           "of 64 KiB PUT, HPKE envelope, wider baselines, second store, public "
+                           "DOI and external timestamp. See paper/audit-response.md.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1190,7 +1215,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.9",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.10",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

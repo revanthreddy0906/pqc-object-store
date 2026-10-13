@@ -4,7 +4,7 @@ Manuscript: *Benchmarking Post-Quantum Key Encapsulation in S3-Compatible Object
 Client Concurrency*.
 
 This letter maps every issue in the report to the change made. Section numbers refer to the
-revised manuscript (`paper/main.tex`). Every number below is produced by
+revised manuscript (`paper/main.tex`) as it stands after the later audit revision (`paper/audit-response.md`), which renumbered several tables and sections. Every number below is produced by
 `analysis/revision_assets.py` from the per-run summaries in `results/revision/` and
 `results/revision-arm/`.
 
@@ -32,14 +32,14 @@ revised manuscript (`paper/main.tex`). Every number below is produced by
 | 4 | Limited external validity | Added a second client architecture (ARM, Graviton3) for the primary family. No native client and no distributed store were added; all general claims were narrowed instead. | Sec. VI-B, IX-D, IX-E, XI |
 | 5 | MinIO bottleneck inferred indirectly | Profiled the server directly: system-call tracing, disk latency and queue depth, CPU sampling. The ceiling is attributed to lock and namespace contention in the metadata path, not the disk. | Sec. VII-C, Table IX |
 | 6 | Run-to-run variability and stalls | Per-run ratios are plotted for every primary cell; a stall rule fixed in advance and blind to the mode is applied as a sensitivity analysis; an order/time regression is reported. Per-cell mean, median, SD, quartiles and range of the paired ratios are in `results/revision/robustness.csv`. | Sec. IX-A to IX-C, Fig. 4 |
-| 7 | Queueing stops at "M/M/c fails" | Added a state-dependent model and a load-dependent fit, trained on alternate rates and scored on held-out rates. | Sec. VII-H, Table XVI, Fig. 5 |
-| 8 | Session amortization lacks a security cost | Swept B_max x T_max and report observed KEM operations per object and objects and bytes per root (median, p95, max) beside CPU, throughput and p99; added threat scenarios and a decision rule. | Sec. VIII, Table XVII |
-| 9 | Hybrid mode underdeveloped | Implemented X-Wing (draft-connolly-cfrg-xwing-kem-11), verified against the draft's test vectors, and measured it across the primary cells on both architectures and an 18-workload matrix from 1 KiB to 128 MiB. The earlier hybrid is relabelled a study-specific concatenation hybrid with no security claim. | Sec. II-B, IV-B, VII-E, Tables XII and XIII |
-| 10 | Security and performance claims mixed | Added a claim taxonomy table. | Sec. IV-E, Table III |
-| 11 | "Handshake" terminology | Replaced throughout by "per-object key-establishment time". The old name appears once, as the assignment's name for the metric. | Sec. VI-D and throughout |
-| 12 | Metadata not scaled | Added fleet totals for 1 M, 100 M and 1 B objects in decimal and binary units, shares of payload, and a discussion of replication, request billing and the second S3 object. | Sec. VII-G, Table XV |
+| 7 | Queueing stops at "M/M/c fails" | Added a state-dependent model and a load-dependent fit, trained on alternate rates and scored on held-out rates. | Sec. VII-I, Table XIX, Fig. 5 |
+| 8 | Session amortization lacks a security cost | Swept B_max x T_max and report observed KEM operations per object and objects and bytes per root (median, p95, max) beside CPU, throughput and p99; added threat scenarios and a decision rule. | Sec. VIII, Table XX |
+| 9 | Hybrid mode underdeveloped | Implemented X-Wing (draft-connolly-cfrg-xwing-kem-11), verified against the draft's test vectors, and measured it across the primary cells on both architectures and an 18-workload matrix from 1 KiB to 128 MiB. The earlier hybrid is relabelled a study-specific concatenation hybrid with no security claim. | Sec. II-B, IV-B, VII-F, Tables XV and XVI |
+| 10 | Security and performance claims mixed | Added a claim taxonomy table. | Sec. IV-F, Table III |
+| 11 | "Handshake" terminology | Replaced throughout by "per-object key-establishment time". The old name appears once, as a loose synonym to avoid. | Sec. VI-D and throughout |
+| 12 | Metadata not scaled | Added fleet totals for 1 M, 100 M and 1 B objects in decimal and binary units, shares of payload, and a discussion of replication, request billing and the second S3 object. | Sec. VII-H, Table XVIII |
 | 13 | Conclusions too broad | Abstract, discussion and conclusion now name the client stack, the single-node store and the cloud provider, and state what the results must not be extended to. | Abstract, Sec. X, XI |
-| 14 | Contribution hierarchy unclear | Added a one-sentence thesis and contributions C1–C4 in order; research questions and results are aligned with them. The architecture is presented as support for C1, not as a cryptographic contribution. | Sec. I |
+| 14 | Contribution hierarchy unclear | Added a one-sentence thesis and contributions in order (C1–C3 after the later audit revision, which demoted the queueing analysis to a supporting observation); research questions and results are aligned with them. The architecture is presented as support for C1, not as a cryptographic contribution. | Sec. I |
 
 ## Results the reviewer should know about
 
@@ -77,9 +77,9 @@ We report three things that do not flatter the result:
    lying inside ±5 % corresponds to TOST at alpha = 0.025. Moving to the standard presentation
    (90 % interval, alpha = 0.05) is therefore a change of presentation and of rigour in
    pre-specification and multiplicity control, not a weakening of the criterion.
-2. **"Handshake overhead" is the assignment's own metric name.** We keep it once, as an alias, so
-   that the paper can be matched to the assignment, and use "per-object key-establishment time"
-   everywhere else.
+2. **"Handshake overhead" is kept once.** The term appears a single time, as a loose synonym
+   the paper says it avoids, so that readers who know the metric by that name can match it;
+   "per-object key-establishment time" is used everywhere else.
 
 ## Deviations from the pre-registration
 

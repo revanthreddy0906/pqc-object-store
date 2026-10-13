@@ -41,33 +41,29 @@ Hyderabad, India\\
 
 \begin{abstract}
 Ciphertext stored in cloud object stores today can be decrypted once a large quantum computer
-exists, so storage is an early candidate for migration to ML-KEM (FIPS~203). The cost of
-ML-KEM has been measured for isolated primitives and for TLS connections, where one key
-establishment serves a whole session, but not in client-side envelope encryption, where every
-object needs its own. We present a reproducible, instrumented evaluation of per-object
-post-quantum key establishment in concurrent S3-compatible storage workloads. One client data
-path (Python, liboqs, chunked AES-256-GCM) is run against a single-node MinIO server on AWS with
-ML-KEM-768, X25519, RSA-OAEP-4096, a symmetric-only baseline, plaintext, two X25519+ML-KEM-768
-hybrids (one of them X-Wing) and a bounded-session variant, in an exploratory campaign
-(\TotalRuns{} runs) and a pre-registered confirmatory campaign on x86 and ARM clients
-(\RevAllRuns{} runs, \RevAllRequests{} million requests, no failed request). ML-KEM-768 takes
-\RevKeMLKEMPut\,ms per PUT and \RevKeMLKEMGet\,ms per GET on the x86 client. In paired
-equivalence tests with a $\pm$5\,\% margin and Holm correction, its throughput is equivalent to
-X25519 in \RevPrimaryEq{} of 8 pre-specified cells on each architecture and inconclusive in the
-remaining \RevPrimaryInc; where the client CPU is the bottleneck it is \RevHotDeficit--\ArmHotDeficit\,\%
-slower, and X-Wing \RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower. RSA-4096 limits
-small-object reads to \RevRsaGetLo--\RevRsaGetHi{} of ML-KEM's throughput. The lasting cost of
-ML-KEM is \RevMetaExtraMLKEM{} bytes of metadata per object. Bounded sessions remove
-\RevSessCpuSavingLo--\RevSessCpuSavingHi\,\% of client CPU per request and change throughput only
-where the client is the bottleneck, at the price of up to $B_{\max}$ objects per leaked root.
-Response time degrades at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable{} of peak
-throughput; a state-dependent queueing
-model halves the prediction error of M/M/c but still places the knee too high. All findings are
-limited to this client stack, a single-node store and one cloud region.
+exists. Where objects are encrypted to a recipient's public key, migration means replacing RSA or
+elliptic-curve key establishment with ML-KEM (FIPS~203) on every object. That cost has been
+measured for isolated primitives and for TLS connections, but not on a concurrent object-store
+data path. We present a reproducible, instrumented evaluation of per-object post-quantum key
+establishment on an S3-compatible store: one Python client path (liboqs, chunked AES-256-GCM)
+against single-node MinIO on AWS, comparing ML-KEM-768 with X25519, RSA-OAEP-4096, a
+symmetric-only baseline and two X25519+ML-KEM-768 hybrids, in an exploratory campaign and a
+pre-registered confirmatory campaign on x86 and ARM clients (\RevAllRuns{} runs,
+\RevAllRequests{} million requests). ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms per
+object on x86. In paired equivalence tests ($\pm$5\,\%, Holm-corrected) its throughput is
+equivalent to X25519 in \RevPrimaryEq{} of 8 pre-specified cells on each architecture and
+non-equivalent in none; most of those cells are limited by the network or the server, where no
+key-establishment mode can matter. The informative case is a saturated client: there ML-KEM is
+\RevHotDeficit--\ArmHotDeficit\,\% slower, and the loss equals its extra client CPU per request
+to within \RevModelErrHot{} percentage points. That extra CPU is not decapsulation, which is
+cheaper than X25519, but the handling of a manifest \RevMetaExtraMLKEM{} bytes larger. The
+lasting costs of ML-KEM are therefore metadata and its processing. All findings are limited to
+this client stack, a single-node store and one cloud provider; a native-client replication is
+the main open item.
 \end{abstract}
 
 \begin{IEEEkeywords}
-post-quantum cryptography, ML-KEM, hybrid KEM, object storage, S3, envelope encryption,
+post-quantum cryptography, ML-KEM, hybrid KEM, HPKE, object storage, S3, envelope encryption,
 equivalence testing, performance evaluation
 \end{IEEEkeywords}
 
@@ -82,9 +78,17 @@ key-encapsulation mechanism ML-KEM~\cite{fips203}.
 
 With client-side envelope encryption, as implemented by the Amazon S3 Encryption Client and by
 Azure Blob Storage client libraries~\cite{s3ec,azurecse}, every object is encrypted under its own
-data key, and that key is protected for the recipient and stored with the object. Replacing the
-key protection with ML-KEM therefore places a key establishment, and its 1{,}088-byte
-ciphertext, on every PUT and every GET rather than once per connection.
+data key, and that key is protected for the recipient and stored with the object.
+
+\textbf{When a public-key KEM per object is needed.} If writer and reader share a symmetric
+key-encryption key, wrapping the data key with AES is already quantum-safe and no KEM is needed;
+that is our baseline B1. A public-key mechanism is required when the writer must not be able to
+decrypt, or does not share a secret with the reader: write-only producers such as log shippers,
+backup agents and sensors that hold only a public key; objects encrypted to several recipients
+or to an escrow key; and data handed across organizational boundaries. These deployments use RSA
+or elliptic-curve key establishment today, and they are the ones that must migrate. For them,
+ML-KEM places a key establishment and its 1{,}088-byte ciphertext on every PUT and every GET
+rather than once per connection.
 
 \textbf{What is known.} Primitive-level studies report the cost of key generation, encapsulation
 and decapsulation and the sizes of keys and ciphertexts on several processor
@@ -96,61 +100,64 @@ establishment~\cite{henziger2019,ozeri2023}.
 
 \textbf{What is not known.} None of these measures ML-KEM where an object store would use it: once
 per object, on a data path whose throughput is set jointly by client CPU, network, metadata
-handling and the storage server, with many clients at once. Whether per-object ML-KEM changes
-capacity, where the bottleneck lies, when amortizing it is worthwhile and whether a queueing model
-predicts the point of degradation are open questions
-(Section~\ref{sec:related}, Table~\ref{tab:gap}).
+handling and the storage server, with many clients at once. A back-of-envelope estimate already
+says that tens of microseconds of KEM against milliseconds of storage round trip should be
+invisible. What that estimate cannot say is whether it holds under concurrency, in which regime
+it fails, by how much, and whether the cause is the KEM computation or the larger ciphertext it
+drags through the data path (Section~\ref{sec:related}, Table~\ref{tab:gap}).
 
 \textbf{Thesis.} This paper presents a reproducible systems-level evaluation of post-quantum
-per-object key establishment in concurrent S3-compatible storage workloads, complemented by
-bounded key-establishment amortization and queue-aware capacity analysis. Its contributions are,
-in order of importance:
+per-object key establishment in concurrent S3-compatible storage workloads, and reduces its
+throughput cost to one measurable quantity, client CPU per request. Its contributions are, in
+order of importance:
 \begin{itemize}
 \item[\textbf{C1}] \textbf{End-to-end benchmark.} An instrumented client-side envelope-encryption
 path on which ML-KEM-768, X25519, RSA-OAEP-4096, symmetric-only, plaintext and two hybrid modes
-are interchangeable, so that differences isolate key establishment
-(Sections~\ref{sec:design} and~\ref{sec:impl}).
-\item[\textbf{C2}] \textbf{Systems evidence.} Measurements over object size, 1--500 concurrent
-workers, closed and open loop, two client architectures, throughput, latency, CPU, memory and
-metadata, with the independently restarted run as the experimental unit and pre-registered
-paired equivalence tests (Sections~\ref{sec:method} and~\ref{sec:results}).
+are interchangeable. The modes share every stage except key establishment and the manifest that
+carries its ciphertext, so differences between them reflect both (Sections~\ref{sec:design}
+and~\ref{sec:impl}).
+\item[\textbf{C2}] \textbf{Systems evidence and a cost model.} Measurements over object size,
+1--500 concurrent workers, two client architectures, throughput, latency, CPU, memory and
+metadata, with the independently restarted run as the experimental unit and pre-registered paired
+equivalence tests; and a saturation model that predicts the throughput ratio of two modes from
+their client CPU per request (Sections~\ref{sec:method} and~\ref{sec:results}).
 \item[\textbf{C3}] \textbf{Security--performance mechanism.} Bounded session amortization of
 ML-KEM with object and time limits, reported as performance gained against objects and bytes
 exposed per root (Section~\ref{sec:tradeoff}).
-\item[\textbf{C4}] \textbf{Capacity analysis.} Open-loop measurements that locate the
-response-time knee, and a comparison of M/M/c with state- and load-dependent models on held-out
-load points (Section~\ref{sec:queue}).
 \end{itemize}
-The architecture and commit protocol support C1; we do not claim them as a new cryptographic
-construction (Table~\ref{tab:claims}).
+Two supporting elements are not claimed as contributions. The architecture and commit protocol
+support C1 and are not a new cryptographic construction (Table~\ref{tab:claims}). The open-loop
+capacity observations of Section~\ref{sec:queue} describe the store, not post-quantum
+cryptography, and their main lesson is known~\cite{schroeder2006}.
 
 \textbf{Research questions.} \textbf{RQ1:} What does per-object ML-KEM-768 add to latency,
 throughput, CPU, memory and metadata, compared with RSA-4096, X25519 and symmetric-only baselines
 on the same data path? \textbf{RQ2:} How does this change with object size, with 1--500 workers
-and with a hybrid construction? \textbf{RQ3:} Where does response time degrade under open-loop
-load, can a queueing model predict that point, and what does bounded amortization buy at what
-exposure?
+and with a hybrid construction, and what explains any difference? \textbf{RQ3:} What does bounded
+amortization buy, at what exposure, and does the choice of mode move the point at which response
+time degrades under open-loop load?
 
 \textbf{Findings.} In the evaluated configuration:
 (i) per-object ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms on the x86 client and
 \ArmKeMLKEMPut--\ArmKeMLKEMGet\,ms on the ARM client, less than X25519 on PUT;
 (ii) its throughput is equivalent to X25519 within $\pm$5\,\% in \RevPrimaryEq{} of 8
-pre-specified cells on each architecture, the other \RevPrimaryInc{} being inconclusive, and it
-is measurably slower (\RevHotDeficit--\ArmHotDeficit\,\%) only where the client CPU is the
-bottleneck;
-(iii) X-Wing costs about \RevXwingOverMlkemGet--\RevXwingOverMlkemPut{} times the
-key-establishment time of ML-KEM alone and is
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower than X25519 in that same client-bound cell,
-and equivalent from 1\,MiB upward;
-(iv) RSA-4096 is the one mode that moves the bottleneck;
-(v) the small-object write ceiling lies in the storage server's metadata path, not in its disk;
-(vi) sessions save a few percent of client CPU and nothing else unless the client is saturated;
-and (vii) the response-time knee lies at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable{} of
-peak throughput.
+pre-specified cells on each architecture, but this is largely a statement about the bottleneck:
+most of those cells are limited by the network or the server;
+(iii) with a saturated client ML-KEM is \RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
+\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and in both cases the loss matches the extra
+client CPU per request;
+(iv) ML-KEM's extra CPU is associated with its larger manifest, not with decapsulation;
+(v) RSA-4096 is the one mode that moves the bottleneck;
+(vi) the small-object write ceiling lies in the storage server's metadata path, not in its disk;
+and (vii) sessions save a few percent of client CPU and nothing else unless the client is
+saturated.
 
 \textbf{Scope.} We do not evaluate the security of ML-KEM, side channels, or transport security,
 which is held constant. All performance statements concern one Python client stack, one
-single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}).
+single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}). Because the
+only regime in which the modes differ is a saturated client, and our client is interpreted,
+the size of that difference on a native client is the most important thing this paper does not
+establish; Section~\ref{sec:pending} lists the experiments that remain.
 
 \section{Background}\label{sec:background}
 \subsection{Key-Encapsulation Mechanisms and ML-KEM}
@@ -171,6 +178,14 @@ $\mathrm{SHA3\mbox{-}256}(ss_M\|ss_X\|ct_X\|pk_X\|\mathit{label})$ and derives b
 from one 32-byte seed; its security proof depends on these concrete choices and does not carry
 over to other ways of mixing two secrets.
 
+\subsection{HPKE}
+Hybrid Public Key Encryption (HPKE, RFC~9180)~\cite{rfc9180} is the standard construction for
+encrypting to a public key: a KEM produces a shared secret, a key schedule derives an AEAD key
+and base nonce from it and from application-supplied context, and messages are sealed under
+sequence-numbered nonces. An IETF draft adds ML-KEM-768 and an X25519+ML-KEM-768 hybrid as HPKE
+KEMs~\cite{hpkepq}. Per-object envelope encryption is an instance of HPKE's single-recipient
+base mode.
+
 \subsection{Envelope Encryption and Object Storage}
 In envelope encryption a per-object data key encrypts the object, and key establishment protects
 that key. We derive data keys with HKDF-SHA256~\cite{rfc5869} and encrypt with AES-256-GCM, whose
@@ -178,7 +193,9 @@ security requires that a nonce is never reused under one key~\cite{sp80038d}. Th
 alternatives are key transport with RSA-OAEP~\cite{rfc8017} and ephemeral-static X25519
 \cite{rfc7748}. Object stores expose buckets and keys through HTTP operations, chiefly PUT and
 GET of whole objects; the S3 interface is the de facto standard~\cite{gadban2021}. We use
-MinIO~\cite{minio}, compiled from its final community release (\MinioRelease).
+MinIO~\cite{minio}, compiled from its final community release (\MinioRelease). Because that
+community edition is no longer developed, our store-specific results (ceilings, knee) should be
+read as those of one representative single-node S3 server, not as current product behaviour.
 
 \subsection{Queueing Models}
 An M/M/c queue has Poisson arrivals at rate $\lambda$, $c$ servers and exponential service times
@@ -219,9 +236,10 @@ Junaid~\cite{junaid2026} & A & Hybrid PQ client-side encryption, self-hosted key
 \end{tabular}
 \end{table*}
 
-\textbf{Primitive benchmarks.} Library benchmarks~\cite{liboqs} and comparative studies
-\cite{rodriguez2025,demir2025,lopez2025} quantify the three KEM operations and the larger keys
-and ciphertexts, including on ARM and constrained devices. They establish that platform and
+\textbf{Primitive benchmarks.} The Kyber design paper~\cite{bos2018} and the
+standard~\cite{fips203} give the cost and sizes of the three KEM operations; library
+benchmarks~\cite{liboqs} and recent comparative preprints
+\cite{rodriguez2025,demir2025,lopez2025} extend them to ARM and constrained devices. They establish that platform and
 implementation matter, which is why we repeat our primary comparison on a second architecture,
 but they contain no storage, concurrency or end-to-end request latency.
 
@@ -248,6 +266,18 @@ Junaid~\cite{junaid2026} proposes a client-side hybrid post-quantum encryption a
 self-hosted key management; its abstract reports per-operation latency on a microcontroller and a
 server, not an object-store workload under concurrent clients.
 
+\textbf{Standard constructions.} HPKE~\cite{rfc9180} and its post-quantum
+extension~\cite{hpkepq} specify how to encrypt to an ML-KEM or hybrid public key but contain no
+measurements. Our envelope predates our reading of that draft and is not HPKE-conformant;
+Section~\ref{sec:hpke} maps one onto the other and states what transfers.
+
+\textbf{Benchmarking method.} Schroeder et al.~\cite{schroeder2006} show that closed- and
+open-loop load generators produce systematically different behaviour and that closed-loop
+results understate response times under load; our open-loop observations are an instance of
+that result. Hoefler and Belli~\cite{hoefler2015} give reporting rules for performance
+measurements, which we follow in treating the run as the unit, reporting intervals and stating
+the experimental setup in full.
+
 \textbf{Bounded key reuse.} Amazon S3 Bucket Keys derive per-object data keys from a time-limited
 bucket-level key and reduce key-service requests by up to 99\,\%~\cite{s3bucketkeys}; the AWS
 Encryption SDK caches data keys under age, message and byte limits~\cite{esdkcache}. Our session
@@ -271,7 +301,11 @@ objects, compromised endpoints and side channels in the client are out of scope.
 
 \subsection{Key-Establishment Modes}
 Table~\ref{tab:modes} lists the modes. All encrypting modes share the HKDF and chunked AES-GCM
-path, so differences between them isolate key establishment. B0 stores plaintext through the same
+path. They differ in the key-establishment computation \emph{and} in the size of the manifest
+that carries its ciphertext (622 to 2{,}085 bytes), which changes parsing, hashing and bytes
+transferred. A difference between two modes is therefore the cost of key establishment together
+with the handling of its ciphertext; Section~\ref{sec:mechanism} separates the two as far as
+the data allows. B0 stores plaintext through the same
 framing; B1 derives keys from a pre-shared 32-byte key and is the symmetric-only floor; R1
 transports a random secret with RSA-OAEP-4096; B2 uses ephemeral-static X25519; P1 uses
 ML-KEM-768. Two hybrids combine X25519 with ML-KEM-768. \emph{P3 is X-Wing} as specified in
@@ -332,10 +366,10 @@ exists, so an interrupted upload is never visible. One logical PUT is therefore 
 \State $\mathit{salt} \xleftarrow{\$} \{0,1\}^{256}$; \ $p \xleftarrow{\$} \{0,1\}^{32}$
 \State $\mathit{ctx} \gets \textsc{Canon}(I,\text{mode},n,|M|,\mathrm{id}(ek),\mathrm{H}(C),\dots)$
 \State $K \gets \mathrm{HKDF}(S,\mathit{salt},\text{``pqc-s3-object-v2''}\|0\|\mathit{ctx})$
-\For{$j \gets 0$ \textbf{to} $n-1$} \Comment{streamed in 8\,MiB parts}
+\For{$j \gets 0$ \textbf{to} $n-1$} \Comment{4\,MiB chunks}
 \State $c_j \gets \mathrm{AES\mbox{-}GCM}_K(p\|\mathrm{be}_{64}(j), M_j, \mathit{ctx}\|j\|\ell_j\|\mathit{final}_j)$
 \EndFor
-\State write $c_0\|\dots\|c_{n-1}$ to \texttt{key.pqcs/$v$/data.enc}
+\State upload $c_0\|\dots\|c_{n-1}$ in 8\,MiB parts to \texttt{key.pqcs/$v$/data.enc}
 \State commit: write $(\mathit{ctx},C,\mathit{salt},p)$ to \texttt{key.pqcs/$v$/manifest.json}
 \EndProcedure
 \Procedure{Get}{$\mathit{key}, dk, \text{mode}$}
@@ -362,6 +396,20 @@ where $\hat\rho$ is a moving average ($\alpha=0.2$) of the fraction of a client 
 threads with a request in flight. Receivers cache decapsulated roots under their own caps and
 reject objects whose authenticated sequence number exceeds them.
 
+\subsection{Relation to HPKE}\label{sec:hpke}
+Our envelope has the structure of HPKE base mode~\cite{rfc9180}: one KEM encapsulation, a key
+derivation bound to application context, and AEAD encryption of a sequence of records. It
+differs in three ways. (1)~The data key is derived with a single HKDF-SHA256 call whose
+\emph{info} is the object context, where HPKE uses a labelled extract-and-expand key schedule
+that also outputs a base nonce. (2)~Chunk nonces are a random prefix followed by a counter, where
+HPKE computes base nonce XOR sequence number. (3)~The chunk index, length and final-chunk flag
+are authenticated in the associated data; HPKE leaves truncation protection to the application.
+The modes P1 and P3 correspond to the KEMs that~\cite{hpkepq} defines for HPKE. We did not
+implement or benchmark HPKE. Since an HPKE-based envelope would perform the same KEM operation
+once per object, a key schedule of a few hash calls and the same AEAD, we expect the per-object
+costs reported here to transfer, but that expectation is untested, and a new design should use
+HPKE and not this format.
+
 \subsection{What Is and Is Not Claimed}
 Table~\ref{tab:claims} separates the kinds of claim this paper makes. The engineering properties
 are supported by design and by tests, not by a proof of the protocol as a whole.
@@ -376,6 +424,7 @@ Class & Claimed & Not claimed \\
 \midrule
 Primitive security & Security inherited from ML-KEM-768, HKDF-SHA256 and AES-256-GCM under their stated assumptions and correct use & Any new proof or analysis of these primitives \\
 Hybrid construction & P3 implements X-Wing and passes the draft's test vectors, so it inherits that construction's analysis & Any security property of the P2 concatenation combiner; P2 is a performance reference only \\
+Envelope & The structure of HPKE base mode (KEM, context-bound key derivation, AEAD) & HPKE conformance, or any analysis of HPKE carrying over to this format \\
 Engineering properties & Identity and version binding, authenticated chunk order and final-chunk flag, commit-last visibility, mode-downgrade rejection and session bounds, each exercised by tamper and stress tests & A formal model or proof of the storage protocol; resistance to side channels \\
 Experimental findings & Measured latency, throughput, CPU, memory, metadata and queueing behaviour of the evaluated configuration & Performance on other S3 implementations, distributed deployments, native clients, other regions or hardware \\
 Out of scope & -- & Availability, traffic analysis, compromised endpoints, deletion, and transport security (held constant) \\
@@ -498,10 +547,9 @@ establishment, key derivation, AES-GCM, manifest handling and storage---its tota
 thread CPU time it consumed, bytes on the wire and metadata size, plus identifiers that tie it to
 its run, repetition, code commit and configuration. A client sampler records the CPU time and
 resident memory of the worker processes and the host's CPU and network counters once per second;
-a server sampler reads the same information from MinIO's Prometheus metrics endpoint.
-A server sampler reads MinIO's Prometheus endpoint and, in the confirmatory campaign, a
-node-exporter endpoint on the server host that supplies dirty and write-back memory, disk
-write rate and latency, and I/O wait.
+a server sampler reads the same information from MinIO's Prometheus metrics endpoint and, in
+the confirmatory campaign, dirty and write-back memory, disk write rate and latency, and I/O wait
+from a node-exporter endpoint on the server host.
 
 \subsection{Validation}
 A validator checks every data set before analysis and refuses it if any check fails: checksums of
@@ -537,7 +585,8 @@ verdicts used a 95\,\% interval inside $\pm$5\,\% and no multiplicity control; w
 exploratory.
 
 The \emph{confirmatory campaign} (batches E--I, \RevAllRuns{} runs, \RevAllRequests{} million
-requests) was pre-registered: hypotheses, primary cells, test, margin, multiplicity correction,
+requests, none of which failed, including the \RevOpenRuns{} open-loop runs, where every queued
+request was eventually served) was pre-registered: hypotheses, primary cells, test, margin, multiplicity correction,
 repetitions, stall rule, the training and held-out split for the queueing model and the session
 grid were written into the project's versioned specification and committed before any of its
 data existed. Table~\ref{tab:batches} lists its batches.
@@ -595,8 +644,8 @@ threads, for 1\,KiB and 64\,KiB PUT.
 \subsection{Metrics}
 \begin{itemize}
 \item \emph{Per-object key-establishment time}: the time a request spends in encapsulation, RSA
-unwrapping, Diffie--Hellman or decapsulation, from the stage timers. The study's assignment calls
-this metric ``handshake overhead''; we avoid that name because no multi-message protocol is
+unwrapping, Diffie--Hellman or decapsulation, from the stage timers. It is sometimes loosely
+called ``handshake overhead''; we avoid that name because no multi-message protocol is
 involved.
 \item \emph{Throughput}: successful requests, or MiB, per second of the measured window.
 \item \emph{CPU}: CPU of the client's benchmark processes and of MinIO during the measured
@@ -634,16 +683,26 @@ interval for estimation. A cell whose 90\,\% interval lies wholly outside the bo
 \emph{non-equivalent}; anything else is \emph{inconclusive}, which is not evidence of ``no
 difference''.
 
-\textbf{Margin.} Five percent is our smallest effect of interest, fixed in advance: it is below a
-capacity change that would alter provisioning, below the \BatchDriftPct\,\% drift in absolute
-small-object throughput observed between sessions of the exploratory campaign, and it is the
-margin that campaign already used. We report sensitivity at $\pm$2\,\% and $\pm$10\,\%.
+\textbf{Margin.} Five percent is our smallest effect of interest and was fixed in advance, as the
+margin the exploratory campaign had already used. Its practical meaning is a provisioning one: a
+5\,\% loss of capacity raises utilization by the same factor, so a deployment planned at or
+below \RevMarginUtil{} of peak throughput stays under the stability boundary we measure in
+Section~\ref{sec:queue} and needs no additional capacity. That argument uses a result of this
+study and was made after the fact; an operator with a tighter target needs a tighter margin,
+which is why we report sensitivity at $\pm$2\,\% and $\pm$10\,\%
+\cite{lakens2017}.
 
 \textbf{Primary family and multiplicity.} The confirmatory hypothesis is the ratio P1/B2 in eight
 closed-loop cells chosen before the campaign: 64\,KiB GET at 128 and 500 workers; 64\,KiB PUT at
 32 workers (the knee of the throughput curve) and 128; 1\,MiB PUT and GET at 32; and 16\,MiB PUT
 and GET at 32. The eight $p$-values are adjusted with Holm's procedure~\cite{holm1979}, which
-controls the family-wise error rate. The same family measured on the ARM client is a replication
+controls the family-wise error rate. \emph{A limitation of this family, recognized after the
+campaign:} only the two 64\,KiB GET cells are limited by the client CPU. The 64\,KiB PUT cells
+are limited by the server and the four cells at 1\,MiB and above by the network or the server,
+so in six of eight cells no key-establishment mode could have changed throughput, and
+equivalence there confirms where the bottleneck is and little about ML-KEM. Throughput is also
+an insensitive endpoint in those cells; we therefore add client CPU per request as an
+exploratory second endpoint (Table~\ref{tab:cpuprimary}). The same family measured on the ARM client is a replication
 and is adjusted in the same way. All other comparisons (P3 and P2 against P1 and B2, R1 against
 P1, and every cell outside the family) are exploratory and reported with unadjusted intervals.
 
@@ -651,6 +710,10 @@ P1, and every cell outside the family) are exploratory and reported with unadjus
 normal-approximation calculation at $\alpha=0.05/8$ and power 0.8 required at most 7 repetitions
 in every primary cell except the knee, which required about 19. We therefore ran 10 repetitions
 per cell and 20 at the knee, with no optional stopping.
+
+\textbf{Distributional assumption.} The $t$-tests assume approximately normal mean log ratios
+from 10 or 20 pairs. As a check we recompute each primary verdict from a percentile-bootstrap
+90\,\% interval of the mean log ratio (20{,}000 resamples).
 
 \textbf{Stall rule.} Fixed in advance and blind to the mode: a closed-loop run is a \emph{stall}
 if its server CPU is below 0.8 times and its throughput below 0.9 times the median of its own
@@ -673,10 +736,11 @@ fixed by the offered rate.
 
 \textbf{Not pre-specified.} The pre-registration fixed the primary family, its test and the
 training and held-out split. It did not fix the following, which were chosen during analysis and
-are exploratory: applying Holm's correction to the ARM family as well; the definition of the knee
-as twice the light-load response time; the functional form of the load-dependent model; the
-order-and-time regression of Section~\ref{sec:validity}; and the layout of the session and hybrid
-tables.
+are exploratory: applying Holm's correction to the ARM family as well; client CPU per request as a
+second endpoint; the saturation model and the stage comparison of Section~\ref{sec:mechanism};
+the bootstrap check; the definition of the knee as twice the light-load response time; the
+functional form of the load-dependent model; the order-and-time regression of
+Section~\ref{sec:validity}; and the layout of the session and hybrid tables.
 
 \section{Results}\label{sec:results}
 \subsection{Per-Object Key-Establishment Time (RQ1)}
@@ -691,7 +755,7 @@ takes \RevKeEcdhPut\,ms on PUT, where the sender also generates an ephemeral key
 times through a Python binding and include its call overhead; they are not primitive benchmarks.
 
 \begin{table}[t]
-\caption{Exploratory campaign: key establishment per request (mean [95\,\% CI], one worker, objects up to 16\,MiB, batch B) and manifest size}
+\caption{Exploratory campaign: key establishment per request (mean [95\,\% CI], one worker, objects up to 16\,MiB, batch B) and manifest size. Manifests were recorded for a 1\,KiB object, except P2, recorded for a 1\,MiB object; the manifest embeds the plaintext size and chunk count, so that value is 6 bytes larger than P2's in Table~\ref{tab:meta}.}
 \label{tab:handshake}
 \centering\footnotesize
 \resizebox{\columnwidth}{!}{\input{generated/tab-handshake.tex}}
@@ -761,9 +825,10 @@ call \texttt{fdatasync}, but those calls are \RevProfSyncCalls\,\% of all calls 
 \RevProfSyncTime\,\% of the traced time. The tracing windows also contain the deletion of
 objects after each run, so we report shares and not counts per upload. \emph{The CPU profile agrees:} \RevProfCpuUser\,\% of MinIO's CPU samples are in
 its own code and \RevProfCpuKernel\,\% in the kernel, where lock-spinning routines alone account
-for \RevProfCpuKernelLocks\,\% of all samples. Across the \RevNoisyRuns{} runs of the 64\,KiB PUT
-cell at 128 workers, throughput follows the server's CPU use (correlation \RevNoisyCpuCorr),
-whatever the mode. We could not resolve function names inside the MinIO binary, so we attribute
+for \RevProfCpuKernelLocks\,\% of all samples. (Across the \RevNoisyRuns{} runs of the 64\,KiB PUT
+cell at 128 workers, throughput and server CPU use move together, with correlation
+\RevNoisyCpuCorr; that is consistent with a server-side origin of the variation but is not
+evidence of cause, since both rise with load.) We could not resolve function names inside the MinIO binary, so we attribute
 the ceiling to \emph{contention in MinIO's and the file system's metadata path on this host}, not
 to a named MinIO component.
 
@@ -783,7 +848,9 @@ Table~\ref{tab:tost} and Fig.~\ref{fig:tost} give the pre-registered result. On 
 ML-KEM-768 is equivalent to X25519 in \RevPrimaryEq{} of the 8 cells after Holm correction and
 inconclusive in \RevPrimaryInc; no cell is non-equivalent. The ARM replication also yields
 \ArmPrimaryEq{} equivalent and \ArmPrimaryInc{} inconclusive cells, though not the same ones.
-Four observations qualify these counts.
+These counts must be read with the limitation stated in Section~\ref{sec:tost}: six of the eight
+cells are limited by the network or the server, where equivalence was to be expected. Five
+observations qualify them.
 
 \emph{Large objects.} All four cells at 1\,MiB and 16\,MiB are equivalent on both architectures,
 with ratios between \RevLargeRatioLo{} and \RevLargeRatioHi{} on x86 and between
@@ -806,7 +873,15 @@ test a power of only \RevPowerNoisy\,\%, and about \RevPowerNoisyNeeded{} would 
 80\,\%. Our power calculation, based on the exploratory campaign's lower variance, was too
 optimistic for this cell.
 
-\emph{Sensitivity.} At $\pm$10\,\% all 8 x86 cells and \ArmPrimaryEqTenPct{} ARM cells are
+\emph{The cost is visible in CPU even where throughput does not move.}
+Table~\ref{tab:cpuprimary} gives the ratio of client CPU per request. Its interval excludes 1 in
+\RevCpuPrimaryExcl{} x86 and \ArmCpuPrimaryExcl{} ARM cells. On 64\,KiB GET ML-KEM needs more
+CPU than X25519; on 64\,KiB PUT it needs slightly less, as its encapsulation is cheaper than
+X25519's ephemeral key generation and exchange.
+
+\emph{Sensitivity.} A percentile bootstrap reproduces the unadjusted $t$-based verdict in
+\RevBootAgree{} of \RevBootTotal{} cells; the exception is the ARM client-bound cell, whose
+interval sits on the 0.95 bound and which the bootstrap places just inside it. At $\pm$10\,\% all 8 x86 cells and \ArmPrimaryEqTenPct{} ARM cells are
 equivalent; at $\pm$2\,\%, \RevPrimaryEqTwoPct{} and \ArmPrimaryEqTwoPct. Excluding stalled runs
 (\RevPrimaryStalledPairs{} pair on x86, \ArmPrimaryStalledPairs{} on ARM) and re-applying the
 correction changes \RevPrimaryNoStallFlips{} verdicts on x86 and \ArmPrimaryNoStallFlips{} on ARM:
@@ -828,6 +903,13 @@ the ARM knee cell, with one pair fewer, becomes inconclusive
 \label{fig:tost}
 \end{figure}
 
+\begin{table}[t]
+\caption{Primary cells: paired ratio of client CPU per request, ML-KEM-768/X25519, with 95\,\% interval (exploratory second endpoint, unadjusted)}
+\label{tab:cpuprimary}
+\centering\footnotesize
+\input{generated/tab-cpuprimary.tex}
+\end{table}
+
 \textbf{Exploratory campaign.} For context, Table~\ref{tab:h1} summarizes the P1/B2 ratios of the
 exploratory campaign over \HoneCells{} cells, judged by its original rule (95\,\% interval inside
 $\pm$5\,\%, five runs, no multiplicity control): \HoneEquiv{} equivalent, \HoneInconc{}
@@ -842,9 +924,73 @@ inconclusive, \HoneDiff{} different. It showed the same client-bound deficit at 
 \end{table}
 
 \finding{4}{In the pre-registered comparison ML-KEM-768 is equivalent to X25519 within
-$\pm$5\,\% in \RevPrimaryEq{} of 8 cells on each architecture and nowhere non-equivalent. It is
+$\pm$5\,\% in \RevPrimaryEq{} of 8 cells on each architecture and nowhere non-equivalent, mostly
+because those cells are limited by the network or the server. It is
 \RevHotDeficit--\ArmHotDeficit\,\% slower where the client CPU is saturated, and small-object
 write cells are too noisy to decide.}
+
+\subsection{Why the Saturated Client Is Slower (RQ2)}\label{sec:mechanism}
+The client-bound deficit needs an explanation, because on GET ML-KEM's decapsulation is
+\emph{cheaper} than X25519's exchange (Table~\ref{tab:ke}).
+
+\textbf{A saturation model.} If the client CPU is exhausted, two modes use the same number of
+cores, and throughput is cores divided by CPU per request. The throughput ratio of mode $a$ to
+mode $b$ is then the inverse ratio of their CPU per request,
+\[\frac{X_a}{X_b}=\frac{c_b}{c_a},\]
+which is close to an accounting identity once saturation holds; its use is that it replaces a
+saturation experiment by a measurement of CPU per request. Table~\ref{tab:model} tests it on
+64\,KiB GET. At 500 workers, where all modes use the same \RevHotCores{} of 16 cores on x86 and
+\ArmHotCores{} on ARM, it predicts the observed ratio of ML-KEM and of both hybrids to within
+\RevModelErrHot{} percentage points on both architectures, and RSA-4096, which needs more than
+twice the CPU, to within \RevModelErrHotRsa. At 128 workers the client is not yet saturated: the
+costlier mode simply uses more cores, throughput holds, and the model over-predicts the loss by
+\RevModelErrMidLo--\RevModelErrMidHi{} points. The deficit of Section~\ref{sec:primary} is
+therefore fully accounted for by client CPU: ML-KEM needs \RevHotCpuDelta\,\textmu s more per
+request than X25519 on x86 at 500 workers (of \RevHotCpuPerRequest\,ms) and
+\ArmHotCpuDelta\,\textmu s more on ARM.
+
+\begin{table}[t]
+\caption{Saturation model on 64\,KiB GET: throughput ratio to X25519 predicted as the inverse ratio of client CPU per request, against the observed ratio (batches E and I)}
+\label{tab:model}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{\input{generated/tab-model.tex}}
+\end{table}
+
+\textbf{Where the extra CPU is not.} Table~\ref{tab:stages} compares the stage timers of ML-KEM
+and X25519 at one worker, where they are not distorted by interpreter-lock waiting. On GET, key
+establishment is \emph{faster} with ML-KEM on both architectures. The stage that is slower by
+the most is manifest handling, which parses the manifest, decodes the ciphertext and verifies
+its hash (+\RevGetStageManifestDelta\,\textmu s on x86, +\ArmGetStageManifestDelta\,\textmu s on
+ARM; +\RevPutStageManifestDelta\,\textmu s and +\ArmPutStageManifestDelta\,\textmu s on PUT,
+which encodes and hashes it). Key derivation is also slower
+(+\RevGetStageKdfDelta\,\textmu s and +\ArmGetStageKdfDelta\,\textmu s on GET) although its
+inputs have the same length in both modes; we cannot explain that difference. The cipher is
+unaffected.
+
+\begin{table}[t]
+\caption{ML-KEM-768 minus X25519 at one worker, 64\,KiB objects (batches F and I1, five runs): difference in mean stage time, and in client CPU per request with its 95\,\% interval}
+\label{tab:stages}
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\input{generated/tab-stages.tex}
+\end{table}
+
+\textbf{What this does and does not establish.} The evidence points at the handling of a
+manifest \RevMetaExtraMLKEM{} bytes larger, not at the KEM computation, as the source of
+ML-KEM's client-bound cost. It does not prove it. The stage differences at one worker are about
+10\,\textmu s, while the CPU difference at 500 workers is \RevHotCpuDelta\,\textmu s; at one
+worker the CPU difference itself is too small to resolve with five runs
+(Table~\ref{tab:stages}), and above one worker the stage timers cannot localize it. The rest may
+be the same manifest work made more expensive by contention, or work outside the timed stages
+such as receiving and decoding the larger manifest. A control that pads the X25519 manifest to
+ML-KEM's size would separate ciphertext size from KEM computation directly; we have not run it
+(Section~\ref{sec:pending}).
+
+\finding{5}{With a saturated client, the throughput ratio of two modes equals the inverse ratio
+of their client CPU per request to within \RevModelErrHot{} percentage points. ML-KEM's extra
+CPU on GET is not decapsulation; the largest measured stage difference is the handling of its
+larger manifest.}
 
 \subsection{Hybrid Key Establishment (RQ2)}\label{sec:hybrid}
 \textbf{Cost per object.} X-Wing takes \RevKeXwingPut\,ms on PUT and \RevKeXwingGet\,ms on GET on
@@ -887,14 +1033,14 @@ separate hybrid penalty. Client peak memory differs from X25519 by a median of
 P2, located in the AES-GCM stage timer, which all modes share.
 
 \begin{table*}[t]
-\caption{Hybrid matrix (batch F; 64\,KiB at 128 workers from batch E): X25519 in absolute terms and paired ratios of ML-KEM-768 (P1), the concatenation hybrid (P2) and X-Wing (P3) to it. $^{*}$ = the 95\,\% interval of the ratio excludes 1 (unadjusted, five runs; ten in batch E).}
+\caption{Hybrid matrix (batch F; 64\,KiB at 128 workers from batch E): X25519 in absolute terms and paired ratios of ML-KEM-768 (P1), the concatenation hybrid (P2) and X-Wing (P3) to it. $^{*}$ = the 95\,\% interval of the ratio excludes 1 (unadjusted, five runs; ten in batch E). Of the \RevMatrixTests{} ratios, \RevMatrixRawSig{} are marked; \RevMatrixFdrSig{} remain at a false-discovery rate of 5\,\% (Benjamini--Hochberg), so individual marks should not be over-read.}
 \label{tab:hybrid}
 \centering\footnotesize
 \setlength{\tabcolsep}{4pt}
 \input{generated/tab-hybrid.tex}
 \end{table*}
 
-\finding{5}{A standards-aligned hybrid is affordable wherever the network or the server limits
+\finding{6}{A standards-aligned hybrid is affordable wherever the network or the server limits
 throughput. Where the client CPU is saturated, X-Wing costs
 \RevXwingHotDeficit--\ArmXwingHotDeficit\,\% of throughput against X25519 and
 \RevXwingVsMlkemHotDeficit--\ArmXwingVsMlkemHotDeficit\,\% against ML-KEM alone in this stack.}
@@ -916,7 +1062,7 @@ memory growth has overlapping intervals across modes in \ServerGrowthOverlap{} o
 \input{generated/tab-resources.tex}
 \end{table*}
 
-\finding{6}{ML-KEM's CPU cost per request is within a few hundredths of a millisecond of
+\finding{7}{ML-KEM's CPU cost per request is within a few hundredths of a millisecond of
 X25519's, and neither client nor server memory depends on the key-establishment mode.}
 
 \subsection{Metadata at Scale (RQ1)}
@@ -927,8 +1073,12 @@ billion objects that is \RevMetaBillionTB\,TB (\RevMetaBillionTiB\,TiB) of addit
 Relative to the payload it is negligible from 1\,MiB upward and larger than the payload itself at
 1\,KiB. These are logical bytes: replication or erasure coding multiplies them, and because the
 manifest is a separate S3 object in our design, it also doubles the number of stored objects and
-write requests, which matters under per-request billing and for inventory scans. A design that
-carries the ciphertext in object metadata would avoid the second object but not the bytes.
+write requests, which matters under per-request billing and for inventory scans. Carrying the
+manifest in the object's own metadata would avoid the second object, but Amazon S3 limits
+user-defined metadata to 2\,KB per object~\cite{s3metadata}; our JSON manifests for ML-KEM and
+both hybrids (\RevMetaMLKEM--\RevMetaStudyHybrid\,bytes) are at or above that limit, so such a
+design needs a compact binary encoding, and has little room left even then, since the ML-KEM
+ciphertext alone is 1{,}088 bytes before any text encoding.
 
 \begin{table}[t]
 \caption{Manifest size per object and its scaling. Extra bytes are relative to X25519.}
@@ -938,22 +1088,29 @@ carries the ciphertext in object metadata would avoid the second object but not 
 \resizebox{\columnwidth}{!}{\input{generated/tab-meta.tex}}
 \end{table}
 
-\finding{7}{ML-KEM-768 adds \RevMetaExtraMLKEM{} bytes of metadata per object: irrelevant for
+\finding{8}{ML-KEM-768 adds \RevMetaExtraMLKEM{} bytes of metadata per object: irrelevant for
 large objects, dominant for kilobyte-sized ones, and \RevMetaBillionTB\,TB per billion objects
 before redundancy.}
 
-\subsection{Queueing Behaviour (RQ3)}\label{sec:queue}
-\textbf{Where the knee is.} Under Poisson arrivals of ML-KEM PUTs (batch H), 1\,KiB requests are
-stable up to \RevQSmallLastStable{} requests/s and unstable from \RevQSmallFirstUnstable; 64\,KiB
-requests are stable up to \RevQMidLastStable{} and unstable from \RevQMidFirstUnstable. Against
-the peak closed-loop throughput of the same batch (\RevQSmallPeak{} and \RevQMidPeak{}
-requests/s) the transition lies between $\rho=\RevQSmallRhoLastStable$ and
-\RevQSmallRhoFirstUnstable{} at 1\,KiB and between \RevQMidRhoLastStable{} and
-\RevQMidRhoFirstUnstable{} at 64\,KiB. Mean response time doubles, relative to light load, between
-\RevQSmallKneeLo{} and \RevQSmallKneeHi{} requests/s at 1\,KiB and between \RevQMidKneeLo{} and
-\RevQMidKneeHi{} at 64\,KiB. The exploratory campaign found the knee in the same place for the
-symmetric-only mode B1 and for P1, so it is a property of the store, not of the key
-establishment.
+\subsection{Open-Loop Capacity (RQ3)}\label{sec:queue}
+This subsection describes the store, not post-quantum cryptography, and we include it for one
+reason: to check that the choice of mode does not move the point of degradation. That closed-loop
+measurements overstate what an open arrival stream can sustain is established
+\cite{schroeder2006}; what we add is where the transition lies for this store.
+
+\textbf{Two thresholds.} We distinguish the \emph{knee}, the interval of offered load in which
+mean response time first exceeds twice its light-load value, from the \emph{stability boundary},
+between the highest rate at which every run kept up and the lowest at which one did not. Under
+Poisson arrivals of ML-KEM PUTs (batch H), with $\rho$ the offered rate over the peak closed-loop
+throughput of the same batch (\RevQSmallPeak{} and \RevQMidPeak{} requests/s): at 1\,KiB the
+knee and the stability boundary coincide, between \RevQSmallKneeLo{} and \RevQSmallKneeHi{}
+requests/s ($\rho=\RevQSmallRhoKneeLo$--\RevQSmallRhoKneeHi); at 64\,KiB the knee lies between
+\RevQMidKneeLo{} and \RevQMidKneeHi{} requests/s ($\rho=\RevQMidRhoKneeLo$--\RevQMidRhoKneeHi)
+and the stability boundary one step higher, between \RevQMidLastStable{} and
+\RevQMidFirstUnstable{} ($\rho=\RevQMidRhoLastStable$--\RevQMidRhoFirstUnstable). The
+confirmatory campaign measured ML-KEM only; the exploratory campaign found the knee in the same
+place for the symmetric-only mode B1 and for P1, which is our evidence that the mode does not
+move it.
 
 \textbf{Models.} We compare three models (Fig.~\ref{fig:queuerev}, Table~\ref{tab:queue}).
 (a)~M/M/$c$ with the light-load service time $S_0$, capacity $\mu$ from the two most overloaded
@@ -971,17 +1128,18 @@ the stable training rates.
 \end{figure}
 
 \begin{table}[t]
-\caption{Queueing models for ML-KEM PUT (requests/s). Stable/unstable: highest stable and lowest unstable offered rate. Observed knee: interval in which mean response time first exceeds twice its light-load value; predicted knee: the rate at which each model does.}
+\caption{Queueing models for ML-KEM PUT (requests/s). Stable/unstable: the stability boundary, i.e.\ highest stable and lowest unstable offered rate. Observed knee: interval in which mean response time first exceeds twice its light-load value; predicted knee: the rate at which each model does.}
 \label{tab:queue}
 \centering\footnotesize
 \setlength{\tabcolsep}{2.5pt}
 \resizebox{\columnwidth}{!}{\input{generated/tab-queue.tex}}
 \end{table}
 
-On the stable held-out rates (\RevQSmallHeldOut{} at 1\,KiB, \RevQMidHeldOut{} at 64\,KiB), M/M/$c$
-has a MAPE of \RevQSmallMapeMmc\,\% and \RevQMidMapeMmc\,\%; the state-dependent model
-\RevQSmallMapeState\,\% and \RevQMidMapeState\,\%; the load-dependent fit \RevQSmallMapeLoad\,\%
-and \RevQMidMapeLoad\,\%. Both alternatives roughly halve the error because they let service time
+On the stable held-out rates (only \RevQSmallHeldOut{} at 1\,KiB and \RevQMidHeldOut{} at
+64\,KiB), M/M/$c$ has a MAPE of \RevQSmallMapeMmc\,\% and \RevQMidMapeMmc\,\%; the
+state-dependent model \RevQSmallMapeState\,\% and \RevQMidMapeState\,\%; the load-dependent fit
+\RevQSmallMapeLoad\,\% and \RevQMidMapeLoad\,\%. The two alternatives are close to each other
+but not identical. Both roughly halve the error because they let service time
 rise with load, which M/M/$c$ cannot: the mean service time of a 1\,KiB PUT grows from
 \RevQSmallServiceLight\,ms at the lightest rate to about \RevQSmallServiceOverload\,ms in
 overload.
@@ -998,10 +1156,11 @@ rate reaches the lower part of that range, not its mean. With only \RevQSmallHel
 \RevQMidHeldOut{} stable held-out points per size, these error figures are indicative rather than
 precise, and the fitted model is a description of this configuration, not a general law.
 
-\finding{8}{Response time degrades at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable{} of
-peak closed-loop throughput. Letting
-service time depend on load halves the prediction error of M/M/c below the knee, but no model we
-tested predicts the knee itself from closed-loop capacity.}
+\finding{9}{For this store, response time doubles at
+\RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop throughput and runs become unstable
+at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable. Letting service time depend on load halves
+the prediction error of M/M/c below the knee, on very few held-out points; no model we tested
+predicts the knee from closed-loop capacity.}
 
 \section{Security--Performance Trade-off}\label{sec:tradeoff}
 \subsection{What a Session Exposes}
@@ -1062,7 +1221,7 @@ The same reasoning applies to the choice between ML-KEM and a hybrid: where the 
 bottleneck the hybrid costs only \RevMetaXwingOverMLKEM{} bytes per object, and where it is, the
 cost is the throughput difference reported in Section~\ref{sec:hybrid}.
 
-\finding{9}{Sessions trade compromise scope for a
+\finding{10}{Sessions trade compromise scope for a
 \RevSessCpuSavingLo--\RevSessCpuSavingHi\,\% saving in client CPU. That saving
 becomes throughput only on client-bound workloads; a bound of 10 objects captures most of it.}
 
@@ -1093,68 +1252,102 @@ instance, it tests the robustness of the ratios and not ARM against x86 in absol
 
 \subsection{Threats to Validity}
 \textbf{Internal.} Stage timers above one worker include interpreter-lock waiting, so
-key-establishment time is reported at one worker only. The exploratory campaign's pause failure
+key-establishment time is reported at one worker only. Modes differ in manifest size as well as
+in key establishment, and we have no control that separates the two
+(Section~\ref{sec:mechanism}). Six of the eight primary cells could not have shown an effect of
+the mode on throughput. The exploratory campaign's pause failure
 (Section~\ref{sec:method}) added noise to small PUT cells; its results for those cells come from
 batch D. The 1\,MiB one-worker slowdown of the hybrids is unexplained. The profiling attribution
 names a subsystem, not a function. The two inconclusive primary cells were under-powered.
 
 \textbf{External.} These are the limits of what the data supports. The client is Python with
-liboqs through a binding: absolute key-establishment times include call overhead, and a native or
-hardware-accelerated client could show a different ratio between modes, most likely where the
-client CPU is the bottleneck. MinIO ran as a single node without erasure coding or replication;
+liboqs through a binding, and it is part of the measuring instrument: the only regime in which
+the modes differ is a saturated client, and that client spends about \RevHotCpuPerRequest\,ms of
+CPU per 64\,KiB GET, most of it interpreter and SDK work. A native client would spend far less,
+so the same absolute cost of key establishment and manifest handling would be a larger share,
+and the saturation model predicts a \emph{larger} relative deficit there. We have not measured
+it. The baseline set is also narrow: no ML-KEM-1024, no RSA-3072, and no remote key-service
+wrap, which is a common deployment path. MinIO ran as a single node without erasure coding or replication;
 a distributed deployment has a different write path and may have a different ceiling and knee.
 Both hosts sat in one placement group with a sub-millisecond round trip; a wide-area client would
 be dominated by the network. All runs used AWS, in two regions, with one server instance type.
 liboqs is intended for prototyping, not production.
 
 \textbf{Construct.} Throughput equivalence within $\pm$5\,\% is an engineering criterion, not a
-statement that two modes are identical. The exploratory verdict counts are not corrected for
+statement that two modes are identical; a ratio of \RevHotRatio{} with a narrow interval is
+formally equivalent and still a real difference. The saturation model is evaluated on the runs
+it describes, not on held-out configurations. The exploratory verdict counts are not corrected for
 multiplicity. Runs last 20\,s; slower effects such as compaction or long-term memory growth are
 not observed.
+
+\subsection{Experiments Still Required}\label{sec:pending}
+The following have not been run, and the paper's claims are limited accordingly.
+(1)~\emph{Padded-manifest control:} X25519 with its manifest padded to ML-KEM's size, on the
+client-bound cells, to separate ciphertext handling from KEM computation.
+(2)~\emph{Native client:} the client-bound cells with a compiled client, as a new pre-registered
+family with client CPU per request as a co-primary endpoint, to test the saturation model where
+the denominator is small.
+(3)~\emph{More repetitions of 64\,KiB PUT:} about \RevPowerNoisyNeeded{} per cell, or removal of
+those cells from the confirmatory family.
+(4)~\emph{An HPKE-conformant envelope}, to confirm that the per-object costs transfer.
+(5)~\emph{Wider baselines:} ML-KEM-1024, RSA-3072 and a remote key-service wrap.
+(6)~\emph{A distributed or second S3 implementation}, and runs of 10 to 30 minutes, for the
+store-side results.
 
 \section{Discussion}\label{sec:discussion}
 \textbf{Migration planning.} In the evaluated configuration, per-object ML-KEM-768 changes
 capacity only where the client CPU is already the bottleneck, and there by
-\RevHotDeficit--\ArmHotDeficit\,\%. An operator
-of a comparable deployment can plan the migration around compatibility, key management and
-metadata growth; the throughput question should be re-measured for workloads of many small reads
-from few clients, and for any client stack other than ours.
+\RevHotDeficit--\ArmHotDeficit\,\%. The saturation model turns that into a procedure an operator
+can apply without a load test: measure client CPU per request for the current and the candidate
+mode on the real workload; if clients are not CPU-bound, expect no throughput change; if they
+are, expect throughput to fall by the ratio of the two. For a client stack other than ours the
+ratio must be re-measured, and for a native client we expect it to be less favourable.
+
+\textbf{Why the cost is metadata.} The KEM computation is not what makes ML-KEM slower than
+X25519 on a saturated client: its decapsulation is cheaper. What ML-KEM adds to every request is
+a ciphertext of 1{,}088 bytes that must be stored, transferred, decoded and hashed. Reducing
+that work, with a binary manifest or by avoiding a second object, is therefore a more promising
+optimization than a faster KEM implementation, subject to the control experiment of
+Section~\ref{sec:pending}.
 
 \textbf{Where the cost lies.} The measurable costs are \RevMetaExtraMLKEM{} bytes of metadata per
 object and, for hybrids, a client-CPU increment that shows only under client saturation.
 RSA-4096 is the poor choice: its private-key operation makes small-object reads CPU-bound at
 \RevRsaGetLo--\RevRsaGetHi{} of ML-KEM's throughput.
 
-\textbf{Capacity planning.} The open-loop results matter more than the cryptographic choice. In
-this store response time degrades at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable{} of
-peak throughput, and capacity
-measured in a closed loop overstates what an open arrival stream can sustain. Provisioning should
-target the knee, measured under open-loop load.
+\textbf{Capacity planning.} For this store, response time degrades at
+\RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop throughput for every mode we
+tested, in line with the known gap between closed- and open-loop behaviour
+\cite{schroeder2006}. That margin is several times larger than the difference between any two
+post-quantum modes.
 
-\section{Conclusion and Future Work}\label{sec:conclusion}
+\section{Conclusion}\label{sec:conclusion}
 We evaluated per-object post-quantum key establishment on one client stack (Python
 \PythonVersion, liboqs \LiboqsVersion), a single-node MinIO server and AWS instances in two
 regions, with x86 and ARM clients. Under these conditions ML-KEM-768 takes
-\RevKeMLKEMPut--\ArmKeMLKEMGet\,ms per object across the two clients, is equivalent to X25519 within $\pm$5\,\% in
-\RevPrimaryEq{} of 8 pre-registered cells on each architecture and non-equivalent in none, and
-is \RevHotDeficit--\ArmHotDeficit\,\% slower where the client CPU is the bottleneck. X-Wing is
-affordable except in that client-bound regime, where it costs
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\%. The costs that remain are \RevMetaExtraMLKEM{} bytes of metadata per object and a small
-client-CPU increment; bounded sessions are justified only where that increment is a measured
-bottleneck. These results should not be extended to distributed object stores, other S3
-implementations, native clients or wide-area deployments without new measurements.
+\RevKeMLKEMPut--\ArmKeMLKEMGet\,ms per object across the two clients and is equivalent to X25519
+within $\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, most of
+which are limited by the network or the server. With a saturated client it is
+\RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
+\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and both losses follow from client CPU per
+request. The evidence attributes ML-KEM's extra CPU to its \RevMetaExtraMLKEM-byte larger
+manifest and not to the KEM itself, pending a control experiment. Bounded sessions are justified
+only where that CPU is a measured bottleneck.
 
-Future work follows from these limits: a native client to separate interpreter overhead from
-cryptographic cost; distributed MinIO and a second S3 implementation; more repetitions of the
-small-object write cells; a queueing model that represents capacity fluctuation; and
-post-quantum signatures for object integrity.
+These results should not be extended to native clients, distributed object stores, other S3
+implementations or wide-area deployments without new measurements. The experiments of
+Section~\ref{sec:pending}, above all a native-client replication of the client-bound cells,
+are what would turn this configuration-specific result into a general one.
 
 \section*{Artifact Availability}
 Code, configurations, the pre-registration, per-run summaries, the raw-data validator and the
 analysis scripts that generate every figure, table and number in this paper
 (\texttt{analysis/summarize.py}, \texttt{final\_analysis.py}, \texttt{make\_paper\_assets.py},
 \texttt{revision\_assets.py}) are in the project repository, organized following ACM artifact
-guidelines~\cite{acmbadges}. The raw request records are archived separately.
+guidelines~\cite{acmbadges}; the configuration files record the random seed of every batch. The
+raw request records (about 11\,GB compressed) are archived separately. The repository is not yet
+public and has no persistent identifier; both, and an external timestamp for the
+pre-registration, are required before submission.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

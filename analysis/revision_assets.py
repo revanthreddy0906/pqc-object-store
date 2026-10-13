@@ -226,6 +226,149 @@ def key_establishment(tx: dict, ta: dict, out: Path, m: Macros) -> None:
     m.add("RevKeShareXwingLarge", num(big["ke_share"] * 100, 2))
 
 
+
+# ---------------------------------------------------------------- mechanism of the client-bound cost
+
+def paired_delta(a: list[dict], b: list[dict], metric: str, scale: float = 1.0):
+    """Mean paired difference a - b by repetition with a 95% t-interval."""
+    by_rep = {r["repetition"]: r for r in b}
+    diffs = [(r[metric] - by_rep[r["repetition"]][metric]) * scale for r in a
+             if r["repetition"] in by_rep]
+    return fa.mean_ci(diffs)
+
+
+def log_p_two_sided(logs: list[float]) -> float:
+    """Two-sided paired t-test of mean log ratio = 0."""
+    n = len(logs)
+    sd = statistics.stdev(logs)
+    if sd == 0:
+        return 0.0 if statistics.fmean(logs) else 1.0
+    t = statistics.fmean(logs) / (sd / math.sqrt(n))
+    return 2 * (1 - stats.t_cdf(abs(t), n - 1))
+
+
+def benjamini_hochberg(p_values: list[float], q: float = 0.05) -> int:
+    """Number of rejections of the Benjamini-Hochberg procedure at false-discovery rate q."""
+    ordered = sorted(p_values)
+    passed = [i + 1 for i, p in enumerate(ordered) if p <= q * (i + 1) / len(ordered)]
+    return max(passed) if passed else 0
+
+
+def mechanism(tx: dict, ta: dict, families: dict, out: Path, results: Path, m: Macros) -> None:
+    # (1) One worker, 64 KiB: where ML-KEM's extra time and CPU sit, relative to X25519.
+    stages = [("ke_mean_ms", "Key establishment"), ("kdf_mean_ms", "Key derivation"),
+              ("aead_mean_ms", "AES-GCM"), ("ser_mean_ms", "Manifest handling"),
+              ("s3_mean_ms", "Storage round trips")]
+    rows, records = [], []
+    for plat, table, exp in (("x86", tx, "final-f"), ("ARM", ta, "final-i1")):
+        for op in ("put", "get"):
+            p1 = table[(exp, op, 65536, "closed", 1, 0.0, "P1", 0, False)]["runs"]
+            b2 = table[(exp, op, 65536, "closed", 1, 0.0, "B2", 0, False)]["runs"]
+            line = [f"{plat} {op.upper()}"]
+            for metric, _ in stages[:4]:
+                mean, lo, hi = paired_delta(p1, b2, metric, 1000.0)
+                line.append(f"{mean:+.1f}".replace("-", "$-$"))
+                records.append({"platform": plat, "operation": op, "stage": metric,
+                                "delta_us": mean, "lo": lo, "hi": hi})
+            cpu, lo, hi = paired_delta(p1, b2, "cpu_ms_per_req", 1000.0)
+            line.append(f"{cpu:+.0f} [{lo:+.0f}, {hi:+.0f}]".replace("-", "$-$"))
+            records.append({"platform": plat, "operation": op, "stage": "cpu_per_request",
+                            "delta_us": cpu, "lo": lo, "hi": hi})
+            rows.append(line)
+            tag = ("Rev" if plat == "x86" else "Arm") + op.capitalize()
+            timed = sum(r["delta_us"] for r in records[-5:-1])
+            m.add(f"{tag}StageCpuDelta", num(cpu, 0))
+            m.add(f"{tag}StageTimedDelta", num(timed, 0))
+            m.add(f"{tag}StageKeDelta", num(records[-5]["delta_us"], 1))
+            m.add(f"{tag}StageManifestDelta", num(records[-2]["delta_us"], 1))
+            m.add(f"{tag}StageKdfDelta", num(records[-4]["delta_us"], 1))
+    fa.write_csv(results / "stage_deltas.csv", records)
+    tex_table(out / "tab-stages.tex",
+              ["Client, op.", "Key est.", "Key deriv.", "AES-GCM", "Manifest", "CPU per request"],
+              rows, "lrrrrr",
+              " & \\multicolumn{4}{c}{Stage time, P1 $-$ B2 (\\textmu s)} & (\\textmu s, 95\\,\\% CI)")
+
+    # (2) Saturation model: with the client CPU exhausted, throughput ratio = inverse CPU ratio.
+    rows, records = [], []
+    for plat, table, exp, modes in (("x86", tx, "final-e", ("P1", "P2", "P3", "R1")),
+                                    ("ARM", ta, "final-i", ("P1", "P3"))):
+        for conc in (128, 500):
+            base = table[(exp, "get", 65536, "closed", conc, 0.0, "B2", 0, False)]
+            for mode in modes:
+                c = table[(exp, "get", 65536, "closed", conc, 0.0, mode, 0, False)]
+                thr, lo, hi, _ = fa.paired(c["runs"], base["runs"], "ops_per_s")
+                cpu, clo, chi, _ = fa.paired(c["runs"], base["runs"], "cpu_ms_per_req")
+                predicted = 1 / cpu
+                records.append({"platform": plat, "concurrency": conc, "mode": mode,
+                                "client_cores_b2": base["client_cores"],
+                                "client_cores_mode": c["client_cores"],
+                                "cpu_ratio": cpu, "cpu_ratio_lo": clo, "cpu_ratio_hi": chi,
+                                "predicted": predicted, "observed": thr, "observed_lo": lo,
+                                "observed_hi": hi, "error": predicted - thr})
+                rows.append([plat, str(conc), mpa.LABEL.get(mode, "P3 X-Wing"),
+                             f"{base['client_cores']:.1f} / {c['client_cores']:.1f}",
+                             f"{cpu:.3f}", f"{predicted:.3f}", f"{thr:.3f}",
+                             f"{(predicted - thr) * 100:+.1f}".replace("-", "$-$")])
+    fa.write_csv(results / "saturation_model.csv", records)
+    tex_table(out / "tab-model.tex",
+              ["Client", "Workers", "Mode", "Client cores (B2 / mode)", "CPU ratio", "Predicted",
+               "Observed", "Error (pp)"], rows, "lrlccccr")
+    hot = [r for r in records if r["concurrency"] == 500]
+    mid = [r for r in records if r["concurrency"] == 128]
+    m.add("RevModelErrHot", num(100 * max(abs(r["error"]) for r in hot if r["mode"] != "R1"), 1))
+    m.add("RevModelErrHotRsa", num(100 * max(abs(r["error"]) for r in hot if r["mode"] == "R1"), 1))
+    m.add("RevModelErrMidLo", num(100 * min(abs(r["error"]) for r in mid if r["mode"] != "R1"), 1))
+    m.add("RevModelErrMidHi", num(100 * max(abs(r["error"]) for r in mid if r["mode"] != "R1"), 1))
+    for plat, name in (("x86", "Rev"), ("ARM", "Arm")):
+        r = next(r for r in hot if r["platform"] == plat and r["mode"] == "P1")
+        m.add(f"{name}ModelHotCpuRatio", f"{r['cpu_ratio']:.3f}")
+        m.add(f"{name}ModelHotPredicted", f"{r['predicted']:.3f}")
+        base = (tx if plat == "x86" else ta)[("final-e" if plat == "x86" else "final-i", "get",
+                                               65536, "closed", 500, 0.0, "B2", 0, False)]
+        mine = (tx if plat == "x86" else ta)[("final-e" if plat == "x86" else "final-i", "get",
+                                               65536, "closed", 500, 0.0, "P1", 0, False)]
+        delta, lo, hi = paired_delta(mine["runs"], base["runs"], "cpu_ms_per_req", 1000.0)
+        m.add(f"{name}HotCpuDelta", num(delta, 0))
+        m.add(f"{name}HotCpuPerRequest", f"{base['cpu_ms_per_req']:.2f}")
+        m.add(f"{name}HotCores", f"{base['client_host_cores']:.1f}")
+
+    # (3) Client CPU per request in the primary family (exploratory second endpoint).
+    rows, excl = [], {"x86": 0, "arm": 0}
+    for i, x in enumerate(families["x86"][("P1", "B2")]):
+        line = [cell_label(x)]
+        for plat, table, fam in (("x86", tx, families["x86"]), ("arm", ta, families["arm"])):
+            row = fam[("P1", "B2")][i]
+            key = (row["experiment"], row["operation"], row["size"], "closed",
+                   row["concurrency"], 0.0)
+            r, lo, hi, _ = fa.paired(table[(*key, "P1", 0, False)]["runs"],
+                                     table[(*key, "B2", 0, False)]["runs"], "cpu_ms_per_req")
+            excl[plat] += not (lo <= 1 <= hi)
+            line.append(f"{r:.3f} [{lo:.3f}, {hi:.3f}]")
+        rows.append(line)
+    tex_table(out / "tab-cpuprimary.tex", ["Cell", "x86 client", "ARM client"], rows, "lcc")
+    m.add("RevCpuPrimaryExcl", excl["x86"])
+    m.add("ArmCpuPrimaryExcl", excl["arm"])
+
+    # (4) Distribution-free sensitivity: percentile-bootstrap 90% interval of the mean log ratio.
+    rng = np.random.default_rng(20261013)
+    agree, total, flips = 0, 0, []
+    for plat, table, fam in (("x86", tx, families["x86"]), ("ARM", ta, families["arm"])):
+        for row in fam[("P1", "B2")]:
+            key = (row["experiment"], row["operation"], row["size"], "closed",
+                   row["concurrency"], 0.0)
+            logs = np.asarray(fa.log_ratios(table[(*key, "P1", 0, False)]["runs"],
+                                            table[(*key, "B2", 0, False)]["runs"], "ops_per_s"))
+            means = rng.choice(logs, size=(20000, len(logs)), replace=True).mean(axis=1)
+            lo, hi = np.exp(np.percentile(means, [5, 95]))
+            boot = lo > 0.95 and hi < 1.05
+            total += 1
+            agree += boot == (row["verdict"] == "equivalent")
+            if boot != (row["verdict"] == "equivalent"):
+                flips.append(f"{plat} {cell_label(row)}")
+    m.add("RevBootAgree", agree)
+    m.add("RevBootTotal", total)
+    (results / "bootstrap_flips.txt").write_text("\n".join(flips) + "\n", encoding="utf-8")
+
 # ---------------------------------------------------------------- hybrid matrix
 
 def hybrid(tx: dict, out: Path, results: Path, m: Macros) -> None:
@@ -233,7 +376,7 @@ def hybrid(tx: dict, out: Path, results: Path, m: Macros) -> None:
     workloads += [("final-f", 65536, 1), ("final-e", 65536, 128)]
     workloads += [("final-f", s, c) for s in (MIB, 16 * MIB) for c in (1, 128)]
     workloads += [("final-f", 128 * MIB, 1)]
-    rows, records = [], []
+    rows, records, p_values = [], [], []
     for exp, size, conc in workloads:
         for op in ("put", "get"):
             base = tx.get((exp, op, size, "closed", conc, 0.0, "B2", 0, False))
@@ -246,6 +389,8 @@ def hybrid(tx: dict, out: Path, results: Path, m: Macros) -> None:
                     other = tx[(exp, op, size, "closed", conc, 0.0, mode, 0, False)]
                     r, lo, hi, n = fa.paired(other["runs"], base["runs"], metric)
                     mark = "$^{*}$" if not (lo <= 1 <= hi) else ""
+                    p_values.append(log_p_two_sided(
+                        fa.log_ratios(other["runs"], base["runs"], metric)))
                     line.append(f"{r:.2f}{mark}")
                     records.append({"experiment": exp, "operation": op, "size": size,
                                     "concurrency": conc, "mode": mode, "metric": metric,
@@ -267,6 +412,9 @@ def hybrid(tx: dict, out: Path, results: Path, m: Macros) -> None:
         m.add(f"RevMatrix{name}Within",
               sum(0.95 <= r["ratio"] <= 1.05 for r in mine))
     m.add("RevMatrixCells", len([r for r in thr if r["mode"] == "P3"]))
+    m.add("RevMatrixTests", len(p_values))
+    m.add("RevMatrixRawSig", sum(p < 0.05 for p in p_values))
+    m.add("RevMatrixFdrSig", benjamini_hochberg(p_values))
     for mode, name in (("P2", "StudyHybrid"), ("P3", "Xwing")):
         r = next(r for r in thr if r["mode"] == mode and r["operation"] == "put"
                  and r["size"] == MIB and r["concurrency"] == 1)
@@ -488,19 +636,21 @@ def queueing(tx: dict, out: Path, results: Path, m: Macros) -> list[dict]:
         m.add(f"RevQ{tag}FirstUnstable", num(first_unstable))
         m.add(f"RevQ{tag}RhoLastStable", f"{last_stable / peak:.2f}")
         m.add(f"RevQ{tag}RhoFirstUnstable", f"{first_unstable / peak:.2f}")
+        m.add(f"RevQ{tag}RhoKneeLo", f"{below / peak:.2f}")
+        m.add(f"RevQ{tag}RhoKneeHi", f"{observed / peak:.2f}")
         m.add(f"RevQ{tag}KneeLo", num(below))
         m.add(f"RevQ{tag}KneeHi", num(observed))
         m.add(f"RevQ{tag}HeldOut", len(errors["mmc"]))
         label = {"mmc": "Mmc", "state": "State", "load": "Load"}
         for name in models:
-            m.add(f"RevQ{tag}Mape{label[name]}", num(100 * statistics.fmean(errors[name]), 0))
+            m.add(f"RevQ{tag}Mape{label[name]}", num(100 * statistics.fmean(errors[name]), 1))
             m.add(f"RevQ{tag}Knee{label[name]}", num(knees[name], -1))
         m.add(f"RevQ{tag}ServiceLight", f"{series[0]['mean_ms']:.1f}")
         m.add(f"RevQ{tag}ServiceOverload",
               num(statistics.fmean(c["mean_ms"] for c in series if not c["stable"]), 0))
         table_rows.append([size_label(size), num(peak, -1), f"{num(last_stable)}/{num(first_unstable)}",
                            f"{num(below)}--{num(observed)}"]
-                          + [f"{100 * statistics.fmean(errors[n]):.0f}\\%" for n in models]
+                          + [f"{100 * statistics.fmean(errors[n]):.1f}\\%" for n in models]
                           + [num(knees[n], -1) for n in models])
 
         grid = np.linspace(series[0]["rate"], 5600, 400)
@@ -762,8 +912,13 @@ def main() -> None:
     queueing(tx, args.out, args.results, m)
     profiles(args.profiles, args.out, args.results, m)
     robustness(runs_x, runs_a, tx, ta, families, args.results, m)
+    mechanism(tx, ta, families, args.out, args.results, m)
+    open_loop = [r for r in runs_x if r["loop"] == "open"]
+    m.add("RevOpenRuns", len(open_loop))
+    m.add("RevOpenFailures", num(sum(r["failures"] for r in open_loop)))
+    m.add("RevMarginUtil", f"{0.95 * 3600 / max(c['ops_per_s'] for c in tx.values() if c['experiment'] == 'final-h' and c['loop'] == 'closed' and c['size'] == 1024):.2f}")
     (args.out / "revision.tex").write_text(HEADER + "\n".join(m.lines) + "\n", encoding="utf-8")
-    print(f"wrote {len(m.lines)} macros, 8 tables and 2 figures to {args.out}")
+    print(f"wrote {len(m.lines)} macros, 11 tables and 2 figures to {args.out}")
 
 
 if __name__ == "__main__":
