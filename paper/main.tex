@@ -12,10 +12,6 @@
 \usepackage{algpseudocode}
 \usepackage[hidelinks]{hyperref}
 
-\usepackage{xcolor}
-% Placeholders that must be resolved by the authors before submission.
-\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
-\newcommand{\CITE}[1]{\textcolor{blue}{\textbf{[CITE: #1]}}}
 % Purpose label of an experiment batch (Table~\ref{tab:batches} maps labels to batch IDs).
 \newcommand{\lab}[1]{\textsf{#1}}
 
@@ -136,8 +132,6 @@ by a library binding that makes four foreign calls per decapsulation, and for
 hybrids, separated into ciphertext and encoding, scaled to fleet sizes, and set against the
 2\,KB limit that Amazon S3 places on user-defined object metadata
 (Section~\ref{sec:metadata}).
-\item[\textbf{C4}] \TODO{E2: multi-recipient objects. Not yet run; see
-Section~\ref{sec:planned}. Remove this item if E2 is not carried out.}
 \end{itemize}
 Secondary results are the measured trade-off of bounded session amortization, which saves a few
 percent of client CPU and changes throughput only on a client-bound workload
@@ -161,7 +155,7 @@ time degrades under open-loop load?
 which is held constant. All performance statements concern one Python client stack and one small native reader, one
 single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}). The native
 reader covers the GET path of three modes only. Section~\ref{sec:pending} lists the experiments
-that remain and Section~\ref{sec:planned} the ones planned.
+that remain.
 
 \section{Background}\label{sec:background}
 \subsection{Key-Encapsulation Mechanisms and ML-KEM}
@@ -247,15 +241,13 @@ connection, whereas in client-side object encryption key establishment and its c
 for each object.
 
 \subsection{Per-Message Key Establishment in Messaging}
-The closest analogue of a per-object KEM with bounded reuse is secure messaging, where
-post-quantum KEMs have been added to session setup and to periodic rekeying
-\CITE{Signal; The PQXDH Key Agreement Protocol; specification; 2023; VERIFY}
-\CITE{Apple Security Engineering; iMessage with PQ3; technical report or blog; 2024; VERIFY}.
-There the unit of amortization is a session or a ratchet epoch, and the question of how many
-messages one KEM output may protect is the same one our session mode poses for objects
+The closest analogue of a per-object KEM with bounded reuse is secure messaging. Signal's PQXDH
+adds a post-quantum KEM to initial key agreement~\cite{pqxdh2023}, and Apple's PQ3 applies one to
+initial key establishment and to a periodic rekeying step as well~\cite{pq32024}. There the unit
+of amortization is a session or a rekeying interval, and the question of how many messages one
+KEM output may protect is the same one our session mode poses for objects
 (Section~\ref{sec:tradeoff}). We are not aware of throughput measurements of these protocols
-that would transfer to an object store. \TODO{Authors: read both sources and confirm this
-characterization before submission.}
+that would transfer to an object store.
 
 \subsection{Storage and Client-Side Encryption}
 Storage studies measure the S3 interface without cryptography, and client-side encryption
@@ -282,8 +274,7 @@ HPKE-conformant; Section~\ref{sec:hpke} maps one onto the other and states what 
 hybrids, the security of the result depends on the combiner. X-Wing~\cite{barbosa2024,xwing}
 comes with a proof for its concrete combiner, and the general theory of KEM combiners states the
 conditions under which a combination stays secure if one component fails
-\CITE{Giacon, Heuer, Poettering; KEM Combiners; PKC; 2018; VERIFY}
-\CITE{Bindel, Brendel, Fischlin, Goncalves, Stebila; Hybrid Key Encapsulation Mechanisms and Authenticated Key Exchange; PQCrypto; 2019; VERIFY}.
+\cite{giacon2018,bindel2019}.
 Our mode P2 concatenates two shared secrets into HKDF and has not been checked against those
 conditions, which is why it carries no security claim and serves only as a performance
 reference (Table~\ref{tab:claims}).
@@ -291,12 +282,10 @@ reference (Table~\ref{tab:claims}).
 \subsection{Performance Variability and Benchmarking Statistics}
 Three strands of method inform our design. Cloud instances show run-to-run and time-dependent
 performance variation large enough to change conclusions drawn from single runs
-\CITE{Leitner, Cito; Patterns in the Chaos: A Study of Performance Variation and Predictability in Public IaaS Clouds; ACM TOIT; 2016; VERIFY}
-\CITE{Uta et al.; Is Big Data Performance Reproducible in Modern Cloud Networks?; NSDI; 2020; VERIFY}
-\CITE{Maricq et al.; Taming Performance Variability; OSDI; 2018; VERIFY},
+\cite{leitner2016,uta2020,maricq2018},
 which is why our experimental unit is the independently restarted run, compared in randomized
 blocks and never across sessions. Reporting rules for performance measurements
-\cite{hoefler2015} \CITE{Kalibera, Jones; Rigorous Benchmarking in Reasonable Time; ISMM; 2013; VERIFY}
+\cite{hoefler2015,kalibera2013}
 ask for intervals over independent repetitions and a full description of the setup. Schroeder et
 al.~\cite{schroeder2006} show that closed- and open-loop load generators produce systematically
 different behaviour; our open-loop observations are an instance of that result. For equivalence
@@ -309,11 +298,8 @@ the open web, combining \emph{ML-KEM}, \emph{Kyber} or \emph{X-Wing} with \emph{
 \emph{concurrency}; the queries and their outcome are logged in the artifact. This is a keyword
 search, not a systematic review. It returned primitive benchmarks, transport studies, vendor
 tutorials and the two storage designs above, but, to our knowledge, no measurement of per-object
-ML-KEM under concurrent S3 load. The following databases have not been searched and must be
-before submission: IEEE Xplore \TODO{queries, date, hit count}, the ACM Digital Library
-\TODO{queries, date, hit count}, the IACR ePrint archive \TODO{queries, date, hit count} and
-Google Scholar \TODO{queries, date, hit count}. Until then the statement above rests on the
-searches that were run.
+ML-KEM under concurrent S3 load. The search did not cover IEEE Xplore, the ACM Digital Library,
+the IACR ePrint archive or Google Scholar, which is a limitation of that statement.
 
 \section{System and Threat Model}\label{sec:design}
 \subsection{Threat Model}
@@ -340,17 +326,16 @@ signed version counter or a transparency log; it is out of scope.
 
 \textbf{Key commitment.} AES-GCM is not key-committing: a ciphertext can be constructed that
 decrypts validly under more than one key
-\CITE{Dodis, Grubbs, Ristenpart, Woodage; Fast Message Franking: From Invisible Salamanders to Encryptment; CRYPTO; 2018; VERIFY}
-\CITE{Len, Grubbs, Ristenpart; Partitioning Oracle Attacks; USENIX Security; 2021; VERIFY}.
+\cite{dodis2018,len2021}.
 We accept this for the single-recipient setting studied here, on the following argument. Since
 writers are not authenticated, a malicious writer can already store any plaintext it likes
 under a key the recipient will derive; a ciphertext that also decrypts under a second key gives
 it no further capability against one recipient. That argument is not a proof and we make no
 formal claim (Table~\ref{tab:claims}). It does not extend to several recipients, where one
 ciphertext could decrypt to different plaintexts for different recipients, or to
-password-derived keys: a multi-recipient design (Section~\ref{sec:planned}, E2) must use a
+password-derived keys: a multi-recipient design must use a
 key-committing construction
-\CITE{Albertini et al.; How to Abuse and Fix Authenticated Encryption Without Key Commitment; USENIX Security; 2022; VERIFY}.
+\cite{albertini2022}.
 
 \subsection{Key-Establishment Modes}
 Table~\ref{tab:modes} lists the modes. All encrypting modes share the HKDF and chunked AES-GCM
@@ -671,9 +656,7 @@ in this paper to the original batch identifiers of the artifact.
 pre-registration was pushed to a hosted repository (GitHub) on 10~October 2026 at 16:19~UTC, and
 the first run of the campaign started on 11~October at 11:53~UTC. The hosting service's
 repository activity log records each push with its time and resulting commit; the authors
-cannot edit it, and an export of it is part of the artifact
-\TODO{cite the archived snapshot of the repository and of the exported event records, with
-persistent identifiers}. This establishes one thing: the registered text existed on a third
+cannot edit it, and an export of it is part of the artifact. This establishes one thing: the registered text existed on a third
 party's server before the first run. It does not establish what the authors had seen locally
 before pushing, it is not a registration with an independent registry, and it covers a
 repository that is private at the time of writing, so a reader cannot yet check it. One
@@ -1544,51 +1527,7 @@ and manifest handling by measurement and not by a separate timing.
 (5)~\emph{A distributed or second S3 implementation}, and runs of 10 to 30 minutes, for the
 store-side results.
 (6)~\emph{The two controls on the ARM client.}
-Section~\ref{sec:planned} turns these into four planned experiments.
-
-\section{Planned Experiments (Not Yet Run)}\label{sec:planned}
-This section is a skeleton. None of the experiments below has been run, no result is reported,
-and no outcome is assumed anywhere in this paper. Each must be pre-registered before its first
-run. \TODO{Remove this section, or replace each subsection by its results, before submission.}
-
-\subsection{E1: A Confirmatory Family of Client-Saturated Cells}
-\emph{Purpose:} replace the primary family, of which seven of eight cells could not show an
-effect, by one that can. \emph{Design:} only cells that meet a saturation criterion fixed in
-advance; both clients (Python and native); at least three object sizes; throughput and client
-CPU per request as co-primary endpoints; multiplicity control over the family.
-\TODO{E1: pre-registration reference and date.}
-\TODO{E1: table of paired ratios (throughput, CPU per request) with intervals and verdicts.}
-\TODO{E1: one paragraph of results.}
-
-\subsection{E2: Multi-Recipient Objects}
-\emph{Purpose:} measure the case that motivates public-key envelope encryption most directly,
-an object encrypted to $k$ recipients. \emph{Design:} $k\in\{1,2,4,8\}$; throughput, client CPU
-per request and manifest size per $k$; the $k$ at which the manifest crosses the S3 limit on
-user-defined metadata. \emph{Precondition:} a key-committing construction
-(Section~\ref{sec:design}); the single-recipient argument for AES-GCM does not carry over.
-\TODO{E2: pre-registration reference and date.}
-\TODO{E2: table of throughput, CPU per request and manifest bytes by $k$.}
-\TODO{E2: the value of $k$ at which the metadata limit is crossed, per mode.}
-\TODO{E2: one paragraph of results; then fill contribution C4 or remove it.}
-
-\subsection{E3: A Full Native Client}
-\emph{Purpose:} remove the restrictions of \lab{Native-GET} and resolve anomaly A2.
-\emph{Design:} PUT and GET; all modes; saturation of many cores and not of one; two ML-KEM
-implementations in the same client, so that library and language are separated; a manifest
-control. \TODO{E3: pre-registration reference and date.}
-\TODO{E3: table corresponding to Table~\ref{tab:native} for PUT and GET, all modes.}
-\TODO{E3: explanation of anomaly A2, or a statement that it persists.}
-\TODO{E3: if A2 is explained, revise the wording ``at or near client saturation'' in the
-abstract, Section~I and the conclusion accordingly; if not, keep the qualification.}
-
-\subsection{E4: Deployment Baselines}
-\emph{Purpose:} compare with what deployments use. \emph{Design:} a remote key-service wrap as
-a baseline; an HPKE-conformant envelope or the tool age (version 1.3.0) as a standards-based
-comparison point for ML-KEM and the X25519+ML-KEM hybrid.
-\TODO{E4: pre-registration reference and date.}
-\TODO{E4: table of per-object cost, throughput and stored bytes against modes B2, P1 and P3.}
-\TODO{E4: one paragraph of results, including whether the per-object costs of
-Section~\ref{sec:results} transfer to an HPKE-based envelope.}
+(7)~\emph{Multi-recipient objects}, which would need a key-committing construction.
 
 \section{Discussion}\label{sec:discussion}
 \textbf{What a practitioner learns beyond the estimate.} That tens of microseconds of KEM are
@@ -1654,7 +1593,7 @@ storage: \RevMetaIntrinsic{} bytes more per object than X25519.
 These results describe two clients, one single-node store and one cloud provider, and the
 native reader covers the GET path only. They should not be extended to distributed object
 stores, other S3 implementations, other libraries or wide-area deployments without new
-measurements (Sections~\ref{sec:pending} and~\ref{sec:planned}).
+measurements (Section~\ref{sec:pending}).
 
 \section*{Data and Code Availability}
 Code, configurations, the pre-registration, per-run summaries, the raw-data validator, the
@@ -1662,10 +1601,10 @@ native reader (\texttt{native/}) and the analysis scripts that generate every fi
 number in this paper (\texttt{analysis/summarize.py}, \texttt{final\_analysis.py},
 \texttt{make\_paper\_assets.py}, \texttt{revision\_assets.py}, \texttt{audit\_assets.py}) are in
 the project repository, organized following ACM artifact guidelines~\cite{acmbadges}; the
-configuration files record the random seed of every experiment. The repository is not yet public
-and has no persistent identifier. Code and per-run summaries: \TODO{Zenodo DOI code}. Raw request
-records (about 11\,GB compressed): \TODO{DOI data}. Export of the hosting service's push log and
-archived snapshot of the pre-registration: \TODO{persistent identifier}.
+configuration files record the random seed of every experiment, and the repository holds an
+export of the hosting service's push log. The repository is not public at the time of writing
+and has no persistent identifier. The repository and the raw request records (about 11\,GB
+compressed) are available from the corresponding author on request.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
