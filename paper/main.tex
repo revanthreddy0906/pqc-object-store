@@ -12,11 +12,6 @@
 \usepackage{algpseudocode}
 \usepackage[hidelinks]{hyperref}
 
-\usepackage{xcolor}
-
-% Placeholder that the authors must resolve before submission.
-\newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
-
 % Purpose label of an experiment batch (Table~\ref{tab:batches} maps labels to batch IDs).
 \newcommand{\lab}[1]{\textsf{#1}}
 
@@ -147,7 +142,7 @@ RSA-4096 is the one mode that moves the bottleneck in the Python client. The ins
 analysis pipeline are an artifact that supports these results and are not claimed as a
 contribution; neither is the architecture or commit protocol, which is not a new cryptographic
 construction (Table~\ref{tab:claims}). The open-loop capacity observations in the supplementary
-material \TODO{confirm supplementary file contains queueing protocol, results and Appendix A} describe the store, not post-quantum cryptography, and their main lesson is
+material describe the store, not post-quantum cryptography, and their main lesson is
 known~\cite{schroeder2006}.
 
 The scope of the study is limited as follows. We do not evaluate the security of ML-KEM, side channels, or transport security,
@@ -282,8 +277,7 @@ the open web, combining \emph{ML-KEM}, \emph{Kyber} or \emph{X-Wing} with \emph{
 search, not a systematic review. It returned primitive benchmarks, transport studies, vendor
 tutorials and the two storage designs above, but, to our knowledge, no measurement of per-object
 ML-KEM under concurrent S3 load. The search did not cover IEEE Xplore, the ACM Digital Library,
-the IACR ePrint archive or Google Scholar, which is a limitation of that statement
-\TODO{hit counts for IEEE Xplore, ACM DL, IACR ePrint, Google Scholar}.
+the IACR ePrint archive or Google Scholar, which is a limitation of that statement.
 
 \subsection{Benchmarking Method}\label{sec:benchmethod}
 Three strands of method inform our design. Cloud instances show run-to-run and time-dependent
@@ -711,7 +705,7 @@ PUT and GET are measured separately, mostly in a closed loop. Each run has a 5\,
 confirmatory campaign measures the primary cells defined below; a hybrid matrix of 1\,KiB to
 128\,MiB at 1 and 128 workers; sessions at $B_{\max}\in\{1,10,100,1000\}$ and
 $T_{\max}\in\{1,10,60\}$\,s; and, for the queueing analysis reported in the supplementary
-material \TODO{confirm supplementary file contains queueing protocol, results and Appendix A}, closed-loop throughput at 1--256 workers and Poisson arrivals at 12 rates from
+material, closed-loop throughput at 1--256 workers and Poisson arrivals at 12 rates from
 1{,}500 to 5{,}600 requests/s served by 256 threads, for 1\,KiB and 64\,KiB PUT. The
 pre-registered queueing protocol (alternate rates as training and held-out points, scored by
 error on the stable held-out rates) is stated in full there.
@@ -761,7 +755,7 @@ The margin of five percent is our smallest effect of interest and was fixed in a
 margin the exploratory campaign had already used. Its practical meaning is a provisioning one: a
 5\,\% loss of capacity raises utilization by the same factor, so a deployment planned at or
 below \RevMarginUtil{} of peak throughput stays under the stability boundary we measure for
-this store (supplementary material \TODO{confirm supplementary file contains queueing protocol, results and Appendix A}) and needs no additional capacity. That argument uses a result of this
+this store (supplementary material) and needs no additional capacity. That argument uses a result of this
 study and was made after the fact; an operator with a tighter target needs a tighter margin,
 which is why we report sensitivity at $\pm$2\,\% and $\pm$10\,\%
 \cite{lakens2017}.
@@ -889,7 +883,7 @@ on GET: its median latency is \HthreeSmallOnePct\,\% above P1 at 64\,KiB and
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{generated/fig-size.pdf}
-\caption{Median latency against object size, one worker (\lab{Expl-Size}; log scales). \TODO{regenerate figure with purpose labels}}
+\caption{Median latency against object size, one worker (\lab{Expl-Size}; log scales).}
 \label{fig:size}
 \end{figure}
 
@@ -906,7 +900,7 @@ campaign and \RevRsaGetLo--\RevRsaGetHi{} at 128 and 500 workers in the confirma
 \begin{figure*}[t]
 \centering
 \includegraphics[width=\textwidth]{generated/fig-throughput.pdf}
-\caption{Exploratory campaign: throughput (MiB/s, mean and 95\,\% CI over five runs) against concurrent workers. 64\,KiB PUT from \lab{Expl-SmallPUT}, others from \lab{Expl-Sweep}. \TODO{regenerate figure with purpose labels}}
+\caption{Exploratory campaign: throughput (MiB/s, mean and 95\,\% CI over five runs) against concurrent workers. 64\,KiB PUT from \lab{Expl-SmallPUT}, others from \lab{Expl-Sweep}.}
 \label{fig:throughput}
 \end{figure*}
 
@@ -1536,7 +1530,7 @@ private-key operation makes small-object reads CPU-bound at \RevRsaGetLo--\RevRs
 ML-KEM's throughput in the Python client.
 
 On the capacity of the store, the open-loop measurements are reported in the supplementary
-material \TODO{confirm supplementary file contains queueing protocol, results and Appendix A} because they describe the store and not post-quantum cryptography. Their result is that
+material because they describe the store and not post-quantum cryptography. Their result is that
 mean response time doubles at \RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop
 throughput, in line with the known gap between closed- and open-loop
 behaviour~\cite{schroeder2006}; the exploratory campaign found that knee in the same place for
@@ -1570,26 +1564,9 @@ number in this paper (\texttt{analysis/summarize.py}, \texttt{final\_analysis.py
 \texttt{make\_paper\_assets.py}, \texttt{revision\_assets.py}, \texttt{audit\_assets.py}) are in
 the project repository, organized following ACM artifact guidelines~\cite{acmbadges}; the
 configuration files record the random seed of every experiment, and the repository holds an
-export of the hosting service's push log. The code, the configurations, the pre-registration,
-the push-log export and the per-run summaries are archived at \TODO{Zenodo DOI}, and the raw
-request records (about 11\,GB compressed) at \TODO{data DOI}.
-
-\section*{Author Contributions}
-Roles follow the CRediT taxonomy.
-Revanth Reddy Lingala: \TODO{CRediT roles}.
-Vainavi Venkat: \TODO{CRediT roles}.
-Saarthak Manocha: \TODO{CRediT roles}.
-Padigela Srujan: \TODO{CRediT roles}.
-K. Gangadhara Rao: \TODO{CRediT roles}.
-
-\section*{Funding}
-\TODO{source of AWS costs}
-
-\section*{Conflicts of Interest}
-\TODO{confirm none}
-
-\section*{Use of Generative AI}
-\TODO{statement per target journal policy}
+export of the hosting service's push log. The repository is not public at the time of writing
+and has no persistent identifier. The repository and the raw request records (about 11\,GB
+compressed) are available from the corresponding author on request.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}

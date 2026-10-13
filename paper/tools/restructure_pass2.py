@@ -72,8 +72,6 @@ K. Gangadhara Rao: \TODO{CRediT roles}.
 PIECES = [
     # ---------------------------------------------------------------- preamble and front matter
     R(1, 13),
-    "\\usepackage{xcolor}\n\n% Placeholder that the authors must resolve before submission.\n"
-    "\\newcommand{\\TODO}[1]{\\textcolor{red}{\\textbf{[TODO: #1]}}}",
     R(15, 44), ABSTRACT, R(63, 66),
     # ---------------------------------------------------------------- I
     R(68, 79), R(81, 89), R(91, 97), R(99, 105), R(107, 115), R(117, 145), R(154, 158), MEASURES,
@@ -130,7 +128,7 @@ PIECES = [
     "\\section{Discussion and Conclusion}\\label{sec:discussion}\\label{sec:conclusion}\n"
     + R(1533, 1574),
     R(1577, 1596),
-    BACK, R(1609, 1612),
+    R(1598, 1607), R(1609, 1612),
 ]
 
 # (old, new): every textual change apart from the moves. Each `old` must occur exactly once.
@@ -314,4 +312,10 @@ for old, new in SUBS:
     if n != 1:
         sys.exit(f"substitution matched {n} times: {old!r}")
     text = text.replace(old, new)
+# Placeholders removed at the authors' request: the paper carries no TODO.
+for gone in (" " + SUPP, "\n\\TODO{hit counts for IEEE Xplore, ACM DL, IACR ePrint, Google Scholar}",
+             " \\TODO{regenerate figure with purpose labels}"):
+    assert gone in text, gone
+    text = text.replace(gone, "")
+assert "TODO" not in text
 sys.stdout.write(text)

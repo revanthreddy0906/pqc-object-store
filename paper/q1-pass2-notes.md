@@ -8,6 +8,16 @@ paragraphs inside the new section or subsection; floats and finding boxes are no
 
 ## 0. Points the authors must know
 
+> **Update, later the same day: all TODOs removed at the authors' request.** The source now has no
+> `\TODO`, and the `xcolor` package and the macro are gone. Consequences: the four
+> placeholder-only sections (Author Contributions, Funding, Conflicts of Interest, Use of
+> Generative AI) are removed; Data and Code Availability is back to the baseline wording
+> (repository not public, no persistent identifier, available from the corresponding author on
+> request), since no DOI exists; the supplement, hit-count and figure-regeneration markers are
+> deleted, with the search limitation sentence kept. Figures 2 and 3 still show "(batch A/B/D)"
+> in their titles, which the caption of the batch table explains. Section 4 below and the Task 5
+> rows of the change log describe the state before this update.
+
 - **This pass re-adds what the previous instruction removed.** The last commit removed the
   Author Contributions, Funding, Conflicts of Interest and Generative AI sections and every TODO
   "for submission". Task 5 asks for them again as placeholders, so the paper is not submittable
