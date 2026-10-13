@@ -11,6 +11,8 @@ establishment alone.
     P1  ML-KEM-768            encapsulation per object
     P2  X25519 + ML-KEM-768   study-specific hybrid: IKM = S_kem || S_ecdh, combined by HKDF
     P3  X-Wing                standards-track hybrid (draft-connolly-cfrg-xwing-kem, xwing.py)
+    H1  ML-KEM-768, direct    binding control: one foreign call per operation, lock released
+    G1  ML-KEM-768, direct    binding control: one foreign call per operation, lock held
     C2  X25519, padded        benchmark control: B2 with its ciphertext zero-padded to ML-KEM's
                               1,088 bytes, so the manifest is as large as P1's (SoT v1.11)
     N1  ML-KEM-768 session    one encapsulation per bounded session root (session.py)
@@ -216,6 +218,18 @@ MODES: dict[str, Mode] = {m.name: m for m in [
          key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM")),
          establish=lambda pub: mlkem.encapsulate(_require(pub.mlkem, "ML-KEM")),
          recover=lambda priv, ct: mlkem.decapsulate(_require(priv.mlkem, "ML-KEM"), ct)),
+    # Binding controls (SoT v1.12): the same ML-KEM-768 and the same manifest as P1, with one
+    # foreign call per operation; H1 releases the interpreter lock around it, G1 holds it.
+    Mode("H1", "ML-KEM-768", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,
+         key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM")),
+         establish=lambda pub: mlkem.encapsulate_direct(_require(pub.mlkem, "ML-KEM"), False),
+         recover=lambda priv, ct: mlkem.decapsulate_direct(_require(priv.mlkem, "ML-KEM"), ct,
+                                                           False)),
+    Mode("G1", "ML-KEM-768", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,
+         key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM")),
+         establish=lambda pub: mlkem.encapsulate_direct(_require(pub.mlkem, "ML-KEM"), True),
+         recover=lambda priv, ct: mlkem.decapsulate_direct(_require(priv.mlkem, "ML-KEM"), ct,
+                                                           True)),
     Mode("P2", "X25519+ML-KEM-768", mlkem.CIPHERTEXT_BYTES + X25519_BYTES, HKDF, AEAD,
          key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM") + _require(pub.x25519, "X25519")),
          establish=_hybrid_send,

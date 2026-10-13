@@ -1,0 +1,24 @@
+# Audit batch L, binding controls (SoT v1.12). P1 reaches liboqs through liboqs-python, which
+# makes four lock-releasing foreign calls per decapsulation. H1 and G1 make one call per
+# operation on a per-process handle; H1 releases the interpreter lock around it, G1 holds it.
+# All three run the same liboqs ML-KEM-768 and write the same manifest.
+experiment_id: final-l
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 10
+get_objects: 32
+seed: 20261020
+blocks:
+  - sizes: [65536]
+    concurrency: [128, 500]
+    operations: [get]
+    modes: [B2, P1, H1, G1]
+  - sizes: [65536]
+    concurrency: [1]
+    operations: [get]
+    modes: [B2, P1, H1, G1]

@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.11 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.12 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.11 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.12 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -483,6 +483,42 @@ T([["Version", "Date", "Change", "Status"],
                            "alpha 0.05, Holm over the two cells. These are new tests on new "
                            "data: batches E/EK are NOT pooled with K and their verdicts stand "
                            "as reported. No optional stopping. Costed at about $10.",
+    "Pending team review (§1.3)"],
+   ["1.12", "13 Oct 2026", "PRE-REGISTRATION of batch L (binding controls) and of two "
+                           "predictions, in response to the second audit. Written while batches "
+                           "J and K are running; none of their data has been downloaded or "
+                           "analysed (only the request counts of the first two runs were seen "
+                           "in the log). MOTIVATION: liboqs-python builds a KeyEncapsulation "
+                           "object per operation and makes four foreign calls per decapsulation "
+                           "(OQS_KEM_new, OQS_KEM_decaps, OQS_MEM_cleanse, OQS_KEM_free) through "
+                           "ctypes.CDLL, which releases the interpreter lock around each; "
+                           "pyca/cryptography's X25519 is one call. An exploratory "
+                           "microbenchmark on the development laptop (16 threads, decapsulation "
+                           "only) showed CPU per operation of 60 us through the binding against "
+                           "33 us (one call, lock released) and 16 us (one call, lock held), "
+                           "from 16-21 us at one thread. NEW MODES: H1 = ML-KEM-768 with one "
+                           "foreign call per operation on a per-process handle, lock released; "
+                           "G1 = the same with the lock held (ctypes.PyDLL). Same liboqs code "
+                           "and same manifest as P1 (unit tests). BATCH L: 64 KiB GET at 1, 128 "
+                           "and 500 workers; modes B2, P1, H1, G1; 10 repetitions; x86 testbed of "
+                           "batches J and K. Primary cell: 500 workers. Primary estimates with "
+                           "90% intervals: throughput and client-CPU-per-request ratios P1/B2, "
+                           "H1/B2, G1/B2, H1/P1 and G1/H1, and the share of P1's deficit removed, "
+                           "S(M) = 1 - log(M/B2)/log(P1/B2) for M in {H1, G1}. Decision rule: "
+                           "'the binding explains the deficit' if G1/B2 or H1/B2 throughput is "
+                           "equivalent within +-2% (TOST, alpha 0.05) while the 90% interval of "
+                           "P1/B2 lies below 1; 'the binding does not explain it' if H1/P1 and "
+                           "G1/P1 are both equivalent within +-2%; otherwise 'partly', reporting "
+                           "S. Read together with batch J (manifest size): the two controls are "
+                           "independent factors and both shares are reported. "
+                           "PREDICTIONS for the CPU decomposition, fixed before the data: (a) "
+                           "from batch E's CPU-per-request ratio P1/B2 at 64 KiB GET, 500 "
+                           "workers (1.046), the throughput ratio P1/B2 in batches J and L in "
+                           "that cell is predicted to be 0.956; (b) from the x86 ratios of batch "
+                           "E (P1 1.046, P3 1.111) the ARM throughput ratios of batch I are "
+                           "predicted to be 0.956 and 0.900 (observed, already known: 0.951 and "
+                           "0.896, so (b) is a retrospective cross-architecture check, not a "
+                           "blind prediction). Costed at about $3.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1246,7 +1282,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.11",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.12",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

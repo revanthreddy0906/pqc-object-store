@@ -45,7 +45,7 @@ def test_round_trip(keys, identity, mode, size):
 
 
 @pytest.mark.parametrize("mode,ke_ct_bytes", [
-    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("C2", 1088), ("P1", 1088), ("P2", 1120), ("P3", 1120),
+    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("C2", 1088), ("P1", 1088), ("H1", 1088), ("G1", 1088), ("P2", 1120), ("P3", 1120),
 ])
 def test_key_establishment_ciphertext_sizes(keys, identity, mode, ke_ct_bytes):
     manifest, _ = encrypt_bytes(keys[0], identity, b"x", CHUNK, mode,
@@ -162,3 +162,20 @@ def test_padded_control_mode_matches_ml_kem_manifest_size(keys, identity):
         assert decrypt_bytes(keys[1], manifest, stored, identity, mode=mode) == b"hello"
         sizes[mode] = len(manifest)
     assert sizes["C2"] == sizes["P1"] > sizes["B2"]
+
+
+def test_direct_ml_kem_paths_interoperate_with_the_binding():
+    """H1 and G1 call the same liboqs ML-KEM-768 as P1 (SoT v1.12 binding controls)."""
+    from pqcstore.crypto import mlkem
+    pair = mlkem.generate_keypair()
+    for hold_gil in (False, True):
+        ciphertext, secret = mlkem.encapsulate_direct(pair.public_key, hold_gil)
+        assert mlkem.decapsulate(pair.private_key, ciphertext) == secret
+        ciphertext, secret = mlkem.encapsulate(pair.public_key)
+        assert mlkem.decapsulate_direct(pair.private_key, ciphertext, hold_gil) == secret
+
+
+def test_binding_control_manifests_match_p1_in_size(keys, identity):
+    sizes = {mode: len(encrypt_bytes(keys[0], identity, b"x", CHUNK, mode, None)[0])
+             for mode in ("P1", "H1", "G1")}
+    assert len(set(sizes.values())) == 1
