@@ -186,6 +186,32 @@ def batch_l(c: Cells, m: Macros) -> list[list[str]]:
     return rows
 
 
+def batch_m(runs: list[dict], out: Path, m: Macros) -> None:
+    """Diagnostic for the 1 MiB one-worker PUT anomaly: AES-GCM stage time by allocator policy."""
+    rows, means = [], {}
+    for mode in ("B2", "P1", "P2", "P3"):
+        line = [{"B2": "B2 X25519", "P1": "P1 ML-KEM-768", "P2": "P2 hybrid",
+                 "P3": "P3 X-Wing"}[mode]]
+        for exp in ("final-m", "final-mt"):
+            mine = [r for r in runs if r["experiment"] == exp and r["mode"] == mode]
+            for metric in ("aead_mean_ms", "ops_per_s"):
+                means[(exp, mode, metric)] = statistics.fmean(r[metric] for r in mine)
+            line += [f"{means[(exp, mode, 'aead_mean_ms')]:.2f}",
+                     f"{means[(exp, mode, 'ops_per_s')]:.0f}"]
+        rows.append(line)
+    tex_table(out / "tab-alloc.tex", ["Mode", "AES-GCM (ms)", "req/s", "AES-GCM (ms)", "req/s"],
+              rows, "lrr|rr",
+              " & \\multicolumn{2}{c|}{Default allocator} & \\multicolumn{2}{c}{Fixed threshold}")
+    for exp, tag in (("final-m", "Default"), ("final-mt", "Fixed")):
+        values = [means[(exp, mode, "aead_mean_ms")] for mode in ("B2", "P1", "P2", "P3")]
+        m.add(f"AudAlloc{tag}Lo", f"{min(values):.2f}")
+        m.add(f"AudAlloc{tag}Hi", f"{max(values):.2f}")
+        m.add(f"AudAlloc{tag}Spread", f"{max(values) / min(values):.1f}")
+        thr = [means[(exp, mode, "ops_per_s")] for mode in ("B2", "P1", "P2", "P3")]
+        m.add(f"AudAlloc{tag}ThrSpread", num((1 - min(thr) / max(thr)) * 100, 0))
+    m.add("AudAllocRuns", sum(r["experiment"] in ("final-m", "final-mt") for r in runs))
+
+
 def batch_n(path: Path, out: Path, results: Path, m: Macros) -> None:
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     cells = defaultdict(dict)
@@ -254,6 +280,8 @@ def main() -> None:
     tex_table(args.out / "tab-control.tex",
               ["Batch, workers", "Comparison", "Throughput ratio", "CPU-per-request ratio"],
               rows, "llcc")
+    if "final-m" in experiments and "final-mt" in experiments:
+        batch_m(runs, args.out, m)
     if args.native.is_file():
         batch_n(args.native, args.out, args.results, m)
     (args.out / "audit.tex").write_text(
