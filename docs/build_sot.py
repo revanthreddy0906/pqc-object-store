@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.13 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.14 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.13 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.14 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -540,6 +540,44 @@ T([["Version", "Date", "Change", "Status"],
                            "transfer ran during them. From now on data is fetched only between "
                            "batches. (3) The disk baseline (fio) of the J/K/L testbed did not "
                            "complete; the network baseline did.",
+    "Pending team review (§1.3)"],
+   ["1.14", "13 Oct 2026", "PRE-REGISTRATION of batch N (native client), written before any of "
+                           "its data exists and before batch L has finished (no batch L data "
+                           "seen). QUESTION: does the client-bound deficit of ML-KEM-768 and "
+                           "X-Wing against X25519, measured with the Python client (throughput "
+                           "ratios 0.960 and 0.904 on x86, batch E; 0.960 in batch J), appear "
+                           "with a compiled client? CLIENT: a Go program (native/, Go 1.26.2, "
+                           "static linux/amd64 binary) that implements the GET path only for "
+                           "modes B2, P1 and P3 and reads objects written by the Python client; "
+                           "a test opens Python-written objects of all three modes and rejects "
+                           "tampered ones. It does the same per-object work as the Python "
+                           "reader (two S3 reads, manifest parsing, ciphertext-hash check, key "
+                           "recovery, HKDF-SHA256, AES-256-GCM per chunk, SHA-256 of the "
+                           "plaintext). Differences that limit the comparison: ML-KEM-768 and "
+                           "X25519 come from Go's standard library (crypto/mlkem, crypto/ecdh), "
+                           "not liboqs or OpenSSL; one process with goroutines, not 16 "
+                           "processes with threads; the S3 SDK is minio-go; no stage timers. "
+                           "DESIGN: 64 KiB GET, 32 fixture objects per mode, closed loop, 5 s "
+                           "warm-up and 20 s measured, 5 s pause, 10 repetitions, randomized "
+                           "complete blocks (cells shuffled within a repetition, modes within a "
+                           "cell), x86 testbed of batches J-L. Cells: (a) client restricted to "
+                           "ONE core (taskset, GOMAXPROCS=1) with 128 workers, which saturates "
+                           "the client by construction; (b) 16 cores, 128 workers; (c) 16 cores, "
+                           "500 workers. A compiled client is expected to be limited by the "
+                           "server or network in (b) and (c); whether it is will be reported "
+                           "from its CPU use. PRIMARY CELL: (a). Primary estimates with 90% "
+                           "intervals: paired ratios P1/B2 and P3/B2 of throughput and of "
+                           "process CPU per request. Decision rule: 'no deficit with a native "
+                           "client' for a mode if its throughput ratio is equivalent to 1 "
+                           "within +-2% (TOST, alpha 0.05); 'deficit' if its 90% interval lies "
+                           "below 0.98; 'advantage' if above 1.02; otherwise inconclusive. The "
+                           "saturation condition is checked first: cell (a) counts as "
+                           "client-saturated only if process CPU is at least 0.95 of one core "
+                           "in every mode. Also reported, descriptive: absolute CPU per request "
+                           "against the Python client's. NOT covered: PUT, sessions, other "
+                           "baselines, a second store. Diagnostic batches M and MT (v1.13) are "
+                           "run only if time remains after batch N; if not, the 1 MiB anomaly "
+                           "stays unexplained and the paper says so.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1303,7 +1341,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.13",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.14",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])
