@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.10 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.11 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.10 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.11 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -454,6 +454,35 @@ T([["Version", "Date", "Change", "Status"],
                            "PENDING: padded-manifest control, native client, about 50 repetitions "
                            "of 64 KiB PUT, HPKE envelope, wider baselines, second store, public "
                            "DOI and external timestamp. See paper/audit-response.md.",
+    "Pending team review (§1.3)"],
+   ["1.11", "13 Oct 2026", "PRE-REGISTRATION of two audit experiments, written before any of "
+                           "their data exists. Testbed as in v1.8 (ap-southeast-2, c7i.4xlarge "
+                           "client, a new i4i.4xlarge server); run = unit; randomized blocks; "
+                           "paired log ratios; all runs primary, stall-excluded as sensitivity "
+                           "(stall rule of v1.8). "
+                           "BATCH J, padded-manifest control. New mode C2 = X25519 with its "
+                           "key-establishment ciphertext zero-padded to 1,088 bytes, so its "
+                           "manifest has exactly the size of P1's (unit test). Cells: 64 KiB GET "
+                           "at 128 and 500 workers and 64 KiB PUT and GET at one worker; modes "
+                           "B2, C2, P1; 10 repetitions. Question: is P1's client-bound deficit "
+                           "against B2 caused by handling a larger manifest? Primary cell: 64 "
+                           "KiB GET, 500 workers. Primary estimates, each with a 90% interval: "
+                           "throughput ratios C2/B2, P1/C2 and P1/B2, and the share explained "
+                           "E = log(C2/B2) / log(P1/B2). Decision rule fixed now: 'manifest "
+                           "size explains the deficit' if P1/C2 is equivalent within +-2% (TOST, "
+                           "alpha 0.05) AND the 90% interval of C2/B2 lies below 1; 'manifest "
+                           "size does not explain it' if C2/B2 is equivalent within +-2% of 1 "
+                           "AND the interval of P1/C2 lies below 1; otherwise 'partly', and E "
+                           "is reported with its interval. Secondary: the same three ratios for "
+                           "client CPU per request; one-worker stage times and CPU per request "
+                           "(paired differences); the 128-worker cell. "
+                           "BATCH K, power. Cells: 64 KiB PUT at 32 and 128 workers; modes B2, "
+                           "P1; 50 repetitions (from the paired log-ratio SDs 0.08 and 0.11 "
+                           "observed in EK and E, about 50 pairs give one TOST at +-5% a power "
+                           "of 0.8). Test: paired TOST on P1/B2 throughput, bounds [0.95, 1.05], "
+                           "alpha 0.05, Holm over the two cells. These are new tests on new "
+                           "data: batches E/EK are NOT pooled with K and their verdicts stand "
+                           "as reported. No optional stopping. Costed at about $10.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1217,7 +1246,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.10",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.11",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

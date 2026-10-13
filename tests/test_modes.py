@@ -45,7 +45,7 @@ def test_round_trip(keys, identity, mode, size):
 
 
 @pytest.mark.parametrize("mode,ke_ct_bytes", [
-    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("P1", 1088), ("P2", 1120), ("P3", 1120),
+    ("B0", 0), ("B1", 0), ("R1", 512), ("B2", 32), ("C2", 1088), ("P1", 1088), ("P2", 1120), ("P3", 1120),
 ])
 def test_key_establishment_ciphertext_sizes(keys, identity, mode, ke_ct_bytes):
     manifest, _ = encrypt_bytes(keys[0], identity, b"x", CHUNK, mode,
@@ -152,3 +152,13 @@ def test_minio_round_trip_every_mode(store, settings, test_prefix, keys, mode):
         assert put.stages.ke_ns < 100_000 and put.stages.kdf_ns == put.stages.aead_ns == 0
     else:
         assert get.stages.ke_ns > 0 and get.stages.aead_ns > 0
+
+
+def test_padded_control_mode_matches_ml_kem_manifest_size(keys, identity):
+    """C2 is X25519 with a manifest exactly as large as P1's (SoT v1.11 control)."""
+    sizes = {}
+    for mode in ("B2", "C2", "P1"):
+        manifest, stored = encrypt_bytes(keys[0], identity, b"hello", CHUNK, mode, None)
+        assert decrypt_bytes(keys[1], manifest, stored, identity, mode=mode) == b"hello"
+        sizes[mode] = len(manifest)
+    assert sizes["C2"] == sizes["P1"] > sizes["B2"]

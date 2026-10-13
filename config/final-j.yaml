@@ -1,0 +1,23 @@
+# Audit batch J, padded-manifest control (SoT v1.11). C2 is X25519 with its ciphertext padded to
+# ML-KEM's size, so its manifest is as large as P1's. If handling the larger manifest causes
+# P1's client-bound deficit, C2 shows the same deficit against B2 and P1 matches C2.
+experiment_id: final-j
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40         # upper bound; the pause ends when the server's write-back is quiet
+pool_bytes: 67108864
+repetitions: 10
+get_objects: 32
+seed: 20261018
+blocks:
+  - sizes: [65536]
+    concurrency: [128, 500]
+    operations: [get]
+    modes: [B2, C2, P1]
+  - sizes: [65536]         # one worker: stage timers and CPU per request without lock waiting
+    concurrency: [1]
+    operations: [put, get]
+    modes: [B2, C2, P1]

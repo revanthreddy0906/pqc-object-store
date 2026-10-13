@@ -11,6 +11,8 @@ establishment alone.
     P1  ML-KEM-768            encapsulation per object
     P2  X25519 + ML-KEM-768   study-specific hybrid: IKM = S_kem || S_ecdh, combined by HKDF
     P3  X-Wing                standards-track hybrid (draft-connolly-cfrg-xwing-kem, xwing.py)
+    C2  X25519, padded        benchmark control: B2 with its ciphertext zero-padded to ML-KEM's
+                              1,088 bytes, so the manifest is as large as P1's (SoT v1.11)
     N1  ML-KEM-768 session    one encapsulation per bounded session root (session.py)
 
 Keys are carried as bytes so they can be passed to worker processes; parsed
@@ -127,6 +129,21 @@ def _ecdh_receive(private_raw: bytes, ephemeral_raw: bytes) -> bytes:
         raise IntegrityError("invalid X25519 ephemeral public key") from None
 
 
+def _padded_ecdh_send(recipient_raw: bytes) -> tuple[bytes, bytes]:
+    """Control mode C2: X25519 whose stored ciphertext has the size of an ML-KEM-768 one.
+
+    The padding carries no information and is not checked on receipt (it is still bound to
+    the object through the ciphertext hash in the context). Not a mode for real use: it
+    exists to separate the cost of handling a large manifest from the cost of the KEM.
+    """
+    epk, secret = _ecdh_send(recipient_raw)
+    return epk + bytes(mlkem.CIPHERTEXT_BYTES - X25519_BYTES), secret
+
+
+def _padded_ecdh_receive(private_raw: bytes, ke_ct: bytes) -> bytes:
+    return _ecdh_receive(private_raw, ke_ct[:X25519_BYTES])
+
+
 def _rsa_send(der: bytes) -> tuple[bytes, bytes]:
     secret = os.urandom(32)
     return _rsa_public(der).encrypt(secret, _OAEP), secret
@@ -190,6 +207,11 @@ MODES: dict[str, Mode] = {m.name: m for m in [
          key_id=lambda pub: _id(_require(pub.x25519, "X25519")),
          establish=lambda pub: _ecdh_send(_require(pub.x25519, "X25519")),
          recover=lambda priv, ct: _ecdh_receive(_require(priv.x25519, "X25519"), ct)),
+    # "X25519-PAD" has the length of "ML-KEM-768", so C2 and P1 manifests are equally long.
+    Mode("C2", "X25519-PAD", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,
+         key_id=lambda pub: _id(_require(pub.x25519, "X25519")),
+         establish=lambda pub: _padded_ecdh_send(_require(pub.x25519, "X25519")),
+         recover=lambda priv, ct: _padded_ecdh_receive(_require(priv.x25519, "X25519"), ct)),
     Mode("P1", "ML-KEM-768", mlkem.CIPHERTEXT_BYTES, HKDF, AEAD,
          key_id=lambda pub: _id(_require(pub.mlkem, "ML-KEM")),
          establish=lambda pub: mlkem.encapsulate(_require(pub.mlkem, "ML-KEM")),
