@@ -1,0 +1,17 @@
+Data at rest that is encrypted under RSA or elliptic-curve keys can be recorded now and
+decrypted once a large quantum computer exists, so systems that encrypt objects to a public key
+must move to ML-KEM, which adds a key-encapsulation operation and its ciphertext to every
+object. That cost is known for primitives and connection setup, but not for a storage client
+under concurrent load. We measured it on an S3-compatible store with a Python
+client on two processor architectures and a native Go reader, comparing ML-KEM with X25519, RSA
+and two hybrid modes in pre-registered paired equivalence tests. With one unexplained exception in the native reader, migration
+changed throughput only where the client was at or near CPU saturation, and there by the ratio
+of client CPU per request, which an operator can measure beforehand. The Python
+client was \RevHotDeficit{} to \ArmHotDeficit\,\% slower; controls on the first architecture trace the deficit there
+to a library binding that makes four foreign calls per decapsulation, and with one call ML-KEM
+was equivalent to X25519 within 2\,\%. A native reader saturated on one core was
+\AudNOneMlkemDeficit\,\% slower, so the cost depends on the implementation and must be measured
+on the actual client. The
+cost that no implementation avoids is storage: \RevMetaIntrinsic{} more bytes of ciphertext per
+object than X25519. The results cover two clients, a single-node store and one cloud
+provider.

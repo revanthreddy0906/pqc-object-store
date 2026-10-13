@@ -82,7 +82,7 @@ def batch_j(c: Cells, m: Macros) -> list[list[str]]:
            for pair in (("C2", "B2"), ("P1", "C2"), ("P1", "B2"))}
     for conc in (500, 128):
         for a, b in (("C2", "B2"), ("P1", "C2"), ("P1", "B2")):
-            rows.append([f"J, {conc}", f"{LABEL[a]} / {LABEL[b]}",
+            rows.append([f"Control-Manifest, {conc}", f"{LABEL[a]} / {LABEL[b]}",
                          fmt(c.logs(exp, "get", conc, a, b, "ops_per_s")),
                          fmt(c.logs(exp, "get", conc, a, b, "cpu_ms_per_req"))])
     pad, pad_lo, pad_hi = ci90(thr[("C2", "B2")])
@@ -147,7 +147,7 @@ def batch_l(c: Cells, m: Macros) -> list[list[str]]:
     exp, rows = "final-l", []
     for conc in (500, 128):
         for a, b in (("P1", "B2"), ("H1", "B2"), ("G1", "B2"), ("H1", "P1"), ("G1", "H1")):
-            rows.append([f"L, {conc}", f"{LABEL[a]} / {LABEL[b]}",
+            rows.append([f"Control-Binding, {conc}", f"{LABEL[a]} / {LABEL[b]}",
                          fmt(c.logs(exp, "get", conc, a, b, "ops_per_s")),
                          fmt(c.logs(exp, "get", conc, a, b, "cpu_ms_per_req"))])
     thr = {pair: c.logs(exp, "get", 500, *pair, "ops_per_s")
@@ -291,7 +291,7 @@ def main() -> None:
     if "final-l" in experiments:
         rows += batch_l(cells, m)
     tex_table(args.out / "tab-control.tex",
-              ["Batch, workers", "Comparison", "Throughput ratio", "CPU-per-request ratio"],
+              ["Experiment, workers", "Comparison", "Throughput ratio", "CPU-per-request ratio"],
               rows, "llcc")
     if "final-m" in experiments and "final-mt" in experiments:
         batch_m(runs, args.out, m)
