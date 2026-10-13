@@ -185,7 +185,6 @@ and base nonce from it and from application-supplied context, and messages are s
 sequence-numbered nonces. An IETF draft adds ML-KEM-768 and an X25519+ML-KEM-768 hybrid as HPKE
 KEMs~\cite{hpkepq}. Per-object envelope encryption has the structure of HPKE's single-recipient
 base mode.
-
 HPKE~\cite{rfc9180} and its post-quantum extension~\cite{hpkepq} specify how to encrypt to an
 ML-KEM or hybrid public key but contain no measurements; the file-encryption tool age adopted
 such recipients~\cite{age2025}. Our envelope predates our reading of that draft and is not
@@ -1369,7 +1368,7 @@ becomes throughput only on client-bound workloads; a bound of 10 objects capture
 Five observations are not explained by anything above. We list them together so that they are
 not read past.
 
-(A1) Key derivation is slower with ML-KEM. At one worker the key-derivation stage is
+(A1) Key derivation on GET at one worker is slower with ML-KEM. At one worker the key-derivation stage is
 +\RevGetStageKdfDelta\,\textmu s (x86) and +\ArmGetStageKdfDelta\,\textmu s (ARM) slower on GET
 with ML-KEM than with X25519, although its inputs have the same length in both modes. The
 padded-manifest control does not show it (+\AudKdfOverPadGet\,\textmu s for ML-KEM over the
@@ -1389,7 +1388,7 @@ workers X-Wing is \RevXwingMidDeficit\,\% (x86) and \ArmXwingMidDeficit\,\% (ARM
 X25519 (Table~\ref{tab:secondary}), although by our criterion that cell is not saturated. The
 client is the busiest resource there, so this may be near-saturation; we did not test it.
 
-(A4) ML-KEM is faster than X25519 at one worker. By the deficit rule, ML-KEM has an
+(A4) In some exploratory cells ML-KEM was faster than X25519 at one worker. By the deficit rule, ML-KEM has an
 advantage in \AudSweepAdvantages{} cells of the exploratory campaign, both PUT at one worker
 (ratios \AudSweepAdvantageLo{} and \AudSweepAdvantageHi, five runs each). Key establishment is
 far too small a share of those requests to produce a difference of that size, and the

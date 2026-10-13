@@ -47,7 +47,25 @@ paragraphs inside the new section or subsection; floats and finding boxes are no
   cite the old section and table numbers.
 - **Placement choices.** Old VII-H (CPU and Memory) sits before the pre-registered family inside
   V-B, so that Finding 2 still closes the subsection. Table I and its introductory sentence open
-  II-B. No paragraphs were merged; every former run-in paragraph keeps its full body.
+  II-B.
+- **Merged paragraphs.** One merge: the old HPKE paragraph (II-C) and the old "Standard Constructions and
+  KEM Combiners" paragraph (III-D) both introduce RFC 9180 and its post-quantum draft and are now one
+  paragraph, II-A par. 3, with no wording change. No other pair of adjacent paragraphs makes the
+  same point, so the rest stay separate; every former run-in paragraph keeps its full body.
+- **Two passages now disagree and need an author decision.** Data and Code Availability says the
+  material is archived at a DOI (placeholder), while IV-B par. 4 still says the repository is
+  "private at the time of writing, so a reader cannot yet check it". That sentence is a stated
+  limitation and was not touched; revise it when the DOI exists.
+- **Table numbers moved.** Because CPU and Memory moved forward and Bounded Sessions now precedes
+  Open Anomalies, tables renumber: old X to XIX become XI to XX (so `tab:tost` is old XI, new XII,
+  and `tab:model` is old XIV, new XV); `tab:resources` old XX is new X; `tab:session` old XXIII is
+  new XXII; `tab:alloc` old XXII is new XXIII. Tables I to IX, XXI and all figures keep their
+  numbers. The task prompt's table numbers are the old ones.
+- **Supplement.** `paper/supplement.tex` cites no section or table number of the main paper, so it
+  needed no cross-reference fix. It was otherwise out of scope and still has one bold run-in
+  heading ("Models.").
+- **Overfull boxes.** The two overfull lines in the build log (11.9 pt and 4.4 pt, both in tables)
+  are identical in the baseline build; this pass added none.
 
 ## 1. Revised source
 
@@ -72,12 +90,12 @@ paragraphs inside the new section or subsection; floats and finding boxes are no
 | II-A | subsection | Key-Encapsulation Mechanisms and ML-KEM | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 1 |
 | II-B | subsection | Hybrid KEMs | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 2 |
 | II-C | subsection | HPKE | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 3 |
-| II-D | subsection | Envelope Encryption and Object Storage | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 5 |
+| II-D | subsection | Envelope Encryption and Object Storage | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 4 |
 | III | section | Related Work | II-B Related Measurements, par. 1 |
 | III-A | subsection | Where Key Establishment Has Been Measured | II-B Related Measurements, par. 2 |
-| III-B | subsection | Per-Message Key Establishment in Messaging | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 6 |
+| III-B | subsection | Per-Message Key Establishment in Messaging | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 5 |
 | III-C | subsection | Storage and Client-Side Encryption | II-B Related Measurements, par. 3 |
-| III-D | subsection | Standard Constructions and KEM Combiners | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 4 |
+| III-D | subsection | Standard Constructions and KEM Combiners | II-A Post-Quantum KEMs, Hybrids and HPKE, par. 3 |
 | III-E | subsection | Performance Variability and Benchmarking Statistics | II-C Benchmarking Method, par. 1 |
 | III-F | subsection | Search | II-B Related Measurements, par. 4 |
 | IV | section | System and Threat Model | III Design and Threat Model, par. 1 |
@@ -176,6 +194,13 @@ paragraphs inside the new section or subsection; floats and finding boxes are no
 | X | run-in | Capacity of the store. | VII Discussion and Conclusion, par. 5 |
 | XI | section | Conclusion | VII Discussion and Conclusion, par. 6 |
 |  | section | Data and Code Availability | back matter Data and Code Availability, par. 1 |
+| VI-F | italic lead-in | A limitation of this family, recognized after the campaign: | IV-C Statistical Analysis, par. 3 (set upright) |
+| VII-C | italic lead-in | The device is not the limit: | V-B Where the Cost Appears, par. 3 (set upright) |
+| VII-C | italic lead-in | System-call time goes to locks and the namespace: | V-B Where the Cost Appears, par. 3 (set upright) |
+| VII-C | italic lead-in | The CPU profile agrees: | V-B Where the Cost Appears, par. 3 (set upright) |
+| VIII-B | italic lead-in | Operations per object | V-F Bounded Sessions, par. 3 (set upright) |
+| VIII-B | italic lead-in | Client CPU | V-F Bounded Sessions, par. 4 (set upright) |
+| VIII-B | italic lead-in | Throughput and tail latency | V-F Bounded Sessions, par. 5 (set upright) |
 
 New text with no predecessor: I par. 9 (the one sentence that replaces the research questions),
 and the back-matter sections Author Contributions, Funding, Conflicts of Interest, Use of
@@ -187,21 +212,22 @@ Generative AI.
 |---|---|---|
 | 1 | I | Deleted the "Research questions." paragraph; added one closing sentence stating what the paper measures |
 | 1 | V-A to V-E | Removed "(RQ1)" and "(RQ2)" from eight subsection titles (the titles themselves are replaced by the Task 2 outline) |
-| 1 | Table VI (`tab-sources`) | "open loop (RQ3)" to "open loop" (generator and generated file) |
+| 1 | Table VI, old and new (`tab-sources`) | "open loop (RQ3)" to "open loop" (generator and generated file) |
 | 1 | IV-C par. 3 | "The confirmatory hypothesis is the ratio P1/B2" to "The pre-registered hypothesis is the ratio P1/B2"; cells, TOST, margin and Holm correction unchanged |
 | 1 | `analysis/*.py` | Three code comments and one report heading no longer say "RQ3" |
 | 2 | whole paper | 11 numbered sections and 50 subsections reduced to 7 sections and 13 subsections as specified; no sub-subsections |
 | 2 | whole paper | 54 bold or italic run-in paragraph headings (one of them the deleted research-questions heading) replaced by topic sentences or, where the first sentence already carried the information, removed; see section 2. Seven italic lead-ins inside paragraphs (profiling, sessions, "A limitation of this family") set upright, wording unchanged |
 | 2 | I par. 7 | C1 to C3 kept as a list; bold titles turned into plain lead-ins |
-| 2 | V-G | A1 to A5 kept as an enumerated sequence; bold titles turned into plain sentences |
+| 2 | V-G | A1 to A5 kept as an enumerated sequence; bold titles turned into plain sentences. A1 and A4 are worded with the limits their paragraphs state ("on GET at one worker", "in some exploratory cells") so that they do not read as general claims |
+| 2 | II-A par. 3 | Old II-C and III-D merged into one paragraph |
 | 2 | IV-B, IV-C, V-F, VI | Six short topic sentences added where a subsection title disappeared ("The metrics are defined as follows.", "The second tool of the analysis is a CPU accounting identity.", "There were five deviations from the pre-registration.", "A session changes what a compromise exposes.", "We first examine run-to-run variation.", "Order and time effects were checked as follows.") and "rule" to "stall rule" in VI par. 2 |
 | 2 | VII par. 6 | "We evaluated" to "In conclusion, we evaluated" |
 | 3 | Abstract | Replaced with the supplied text; numbers kept as macros; mismatches listed in section 0 |
-| 4.1 | Table III (`tab:claims`) | "native clients" to "native clients other than the GET-only Go reader" |
-| 4.2 | Table XI (`tab-tost`) | Group headers "batches E, EK" / "batches I, IK" to the labels Primary-x86 / Primary-ARM |
+| 4.1 | Table III, old and new (`tab:claims`) | "native clients" to "native clients other than the GET-only Go reader" |
+| 4.2 | Table XI old, XII new (`tab-tost`) | Group headers "batches E, EK" / "batches I, IK" to the labels Primary-x86 / Primary-ARM |
 | 4.2 | Fig. 2, Fig. 3 captions | TODO to regenerate the figures with purpose labels |
 | 4.3 | II-A par. 3 | "is an instance of" to "has the structure of" |
-| 4.4 | Table XIV (`tab-model`) and its caption | Column "Predicted" to "Implied by CPU" |
+| 4.4 | Table XIV old, XV new (`tab-model`) and its caption | Column "Predicted" to "Implied by CPU" |
 | 4.5 | III par. 2 | "as HPKE base mode does not either" to "and neither does HPKE base mode" |
 | 4.6 | IV-A par. 9 | "For the replication of Section ... we wrote a second, deliberately small client in Go" to "As a second client (Section ...) we wrote a deliberately small reader in Go" |
 | 4.7 | whole paper | Every old section label is attached to the heading that absorbed it, so all references resolve to new numbers; five references that would have pointed at their own section reworded ("described below", "see the CPU accounting below", "see the end of this subsection", "described above" twice) |
@@ -234,10 +260,10 @@ Generative AI.
 ```
 == body (after abstract) ==
 macro multiset: IDENTICAL
-digit-token multiset: {'2': (61, 55), '3': (62, 61), '1': (127, 121), '25519': (79, 78), '16': (17, 16), '500': (25, 24)}
+digit-token multiset: {'2': (61, 55), '1': (127, 121), '16': (17, 16), '25519': (79, 78), '500': (25, 24), '3': (62, 61)}
 == abstract ==
 macro multiset: IDENTICAL
-digit-token multiset: {'86': (1, 2), '768': (0, 1)}
+digit-token multiset: {'768': (0, 1), '86': (1, 2)}
 finding boxes: 6 6 byte-identical and in order
 floats changed (old side): ['\\begin{table*}[t]\n\\caption{Claim taxonomy}\n\\label{tab:claims', '\\begin{figure}[t]\n\\centering\n\\includegraphics[width=\\columnw', '\\begin{figure*}[t]\n\\centering\n\\includegraphics[width=\\textwi', '\\begin{table}[t]\n\\caption{CPU accounting on 64\\,KiB GET: the']
 floats changed (new side): ['\\begin{table*}[t]\n\\caption{Claim taxonomy}\n\\label{tab:claims', '\\begin{figure}[t]\n\\centering\n\\includegraphics[width=\\columnw', '\\begin{figure*}[t]\n\\centering\n\\includegraphics[width=\\textwi', '\\begin{table}[t]\n\\caption{CPU accounting on 64\\,KiB GET: the']
@@ -309,3 +335,4 @@ Reading of that output:
   touched by Tasks 4 and 5. Deviations (1) to (5), anomalies A1 to A5, the "did not fix the
   following" list, the experiments (1) to (7) and every limitation sentence are among the lines
   that are present verbatim, apart from the opening words of A1 to A5.
+- Old II-A to II-D, III-B and III-D land in II-A; "par." numbers above reflect the merge.

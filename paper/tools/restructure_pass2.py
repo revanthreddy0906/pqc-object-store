@@ -80,7 +80,7 @@ PIECES = [
     # ---------------------------------------------------------------- II
     "\\section{Background and Related Work}\\label{sec:background}\\label{sec:related}\n"
     "\\subsection{Post-Quantum KEMs, Hybrids and HPKE}\\label{sec:kems}\n" + R(162, 169),
-    R(172, 177), R(180, 185), R(270, 280), R(188, 196), R(244, 250),
+    R(172, 177), R(180, 185) + "\n" + R(270, 280), R(188, 196), R(244, 250),
     "\\subsection{Related Measurements}\\label{sec:measurements}\n" + R(199, 201),
     R(203, 227), R(230, 241), R(253, 267), R(295, 302),
     "\\subsection{Benchmarking Method}\\label{sec:benchmethod}\n" + R(283, 292),
@@ -268,13 +268,13 @@ SUBS = [
      "Throughput and tail latency do not change"),
     # ---- Section V-G
     ("\\textbf{(A1) A slower key derivation with ML-KEM.} At one",
-     "(A1) Key derivation is slower with ML-KEM. At one"),
+     "(A1) Key derivation on GET at one worker is slower with ML-KEM. At one"),
     ("\\textbf{(A2) A native deficit without saturation.} In",
      "(A2) The native reader shows a deficit without saturation. In"),
     ("\\textbf{(A3) X-Wing below X25519 in a Python cell we call unsaturated.} At",
      "(A3) X-Wing is below X25519 in a Python cell we call unsaturated. At"),
     ("\\textbf{(A4) ML-KEM faster than X25519 at one worker.} By",
-     "(A4) ML-KEM is faster than X25519 at one worker. By"),
+     "(A4) In some exploratory cells ML-KEM was faster than X25519 at one worker. By"),
     ("\\textbf{(A5) An allocator effect at 1\\,MiB.} In",
      "(A5) An allocator effect appears at 1\\,MiB. In"),
     # ---- Section VI
