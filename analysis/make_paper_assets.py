@@ -7,7 +7,7 @@ manifest sizes (analysis/metadata_sizes.py).
 
 Which batch is authoritative for which result (SoT v1.7):
   A  concurrency sweep: GET at every size, PUT at 1 MiB and 16 MiB
-  B  object-size sweep at one worker; handshake cost (objects up to 16 MiB)
+  B  object-size sweep at one worker; key-establishment time (objects up to 16 MiB)
   C  open loop (queueing model), queue-aware N1, N1 on GET
   D  re-run of small-object PUT (1 KiB, 64 KiB) with a working pause, including N1 PUT
 Ratios are computed only between modes of the same batch, paired by repetition.
@@ -286,8 +286,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path("paper/generated"))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    for stale in args.out.glob("*"):
-        stale.unlink()
+    own = {"numbers.tex", "fig-n1.pdf", "fig-queue.pdf", "fig-size.pdf", "fig-throughput.pdf",
+           "tab-components.tex", "tab-h1.tex", "tab-handshake.tex", "tab-resources.tex",
+           "tab-sources.tex"}
+    for stale in args.out.glob("*"):     # analysis/revision_assets.py owns the other files
+        if stale.name in own:
+            stale.unlink()
 
     runs = fa.load_runs(args.runs)
     fa.flag_stalls(runs)
@@ -645,7 +649,7 @@ def main() -> None:
          "concurrency sweep: GET; PUT $\\geq$1\\,MiB; hybrid P2"],
         ["B", num(len([r for r in runs if r["experiment"] == "final-b"])),
          f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-b') / 1e6, 1)}\\,M",
-         "object size 1\\,KiB--500\\,MiB; handshake cost"],
+         "object size 1\\,KiB--500\\,MiB; key-establishment time"],
         ["C", num(len([r for r in runs if r["experiment"] == "final-c"])),
          f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-c') / 1e6, 1)}\\,M",
          "open loop (RQ3); N1 on GET; queue-aware N1"],

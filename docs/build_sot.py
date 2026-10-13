@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.8 · 10 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.9 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.8 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.9 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -389,6 +389,38 @@ T([["Version", "Date", "Change", "Status"],
                           "G (sessions), H (queueing, ML-KEM only), P (profiling, no performance "
                           "numbers), I/IK/I1 (ARM; I1 = one-worker cells). No native "
                           "client: claims are limited to the evaluated Python/liboqs stack.",
+    "Pending team review (§1.3)"],
+   ["1.9", "13 Oct 2026", "RESULTS of the pre-registered revision experiments (v1.8). "
+                          "Data: x86 batches E, EK, F, G, H = 1,165 runs, 78.3 M requests; ARM "
+                          "batches I, IK, I1 = 330 runs, 19.4 M requests; no failed request, no "
+                          "invalid run; batch P = profiles only. Testbed: AWS ap-southeast-2. "
+                          "(1) Primary family P1/B2, Holm over 8 cells: x86 6 equivalent, 2 "
+                          "inconclusive (64 KiB PUT at 32 and 128 workers), 0 non-equivalent; ARM "
+                          "6 equivalent, 2 inconclusive (64 KiB GET at 500 workers, 64 KiB PUT at "
+                          "128), 0 non-equivalent. 64 KiB GET at 500 workers: ratio 0.960 (x86) and "
+                          "0.951 (ARM), a real client-bound deficit. Excluding stalls (8 x86 runs, "
+                          "3 ARM runs, all small PUT) changes no verdict. (2) X-Wing (P3): "
+                          "non-equivalent to X25519 at 64 KiB GET, 500 workers (0.904 x86, 0.896 "
+                          "ARM); equivalent from 1 MiB upward. (3) Profiling: small-PUT ceiling is "
+                          "lock (futex 45% of traced syscall time) and namespace (35%) contention "
+                          "in MinIO's metadata path; data-disk write latency 0.20 ms median; "
+                          "fdatasync is called 0.17 times per stored object and takes 1.1% of "
+                          "traced time. (4) Sessions: 2.1-3.7% less client CPU per request for "
+                          "B_max >= 10, no throughput change on server-bound 1 KiB PUT, +3.3% on "
+                          "client-bound 64 KiB GET; with T_max = 1 s a root protected a median of "
+                          "248 objects (closed loop) or 94 (1,500/s). (5) Queueing: held-out MAPE "
+                          "16%/13% (M/M/c), 8%/4% (state-dependent), 8%/4% (load-dependent fit) at "
+                          "1 KiB/64 KiB; the knee is still predicted too late. (6) Metadata: P1 "
+                          "2,034 B, P3 2,074 B, B2 622 B per object. "
+                          "DEVIATIONS: (a) the first attempt at batch E was stopped after 134 of "
+                          "300 runs by a spend guard of the cloud account; that data was never "
+                          "downloaded or analysed and the batch was restarted from run 1 with the "
+                          "same configuration and seed; (b) batch P was run twice (strace, then "
+                          "perf); (c) the stall rule applies to closed-loop runs only; (d) the "
+                          "achieved power in the 64 KiB PUT cells was far below plan because their "
+                          "variance exceeded that of batches A and D. Analysis: "
+                          "analysis/revision_assets.py; paper restructured per the report, with "
+                          "paper/response-to-review.md.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1152,7 +1184,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.8",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.9",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])
