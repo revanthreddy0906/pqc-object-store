@@ -190,8 +190,8 @@ Generative AI.
 | 1 | Table VI (`tab-sources`) | "open loop (RQ3)" to "open loop" (generator and generated file) |
 | 1 | IV-C par. 3 | "The confirmatory hypothesis is the ratio P1/B2" to "The pre-registered hypothesis is the ratio P1/B2"; cells, TOST, margin and Holm correction unchanged |
 | 1 | `analysis/*.py` | Three code comments and one report heading no longer say "RQ3" |
-| 2 | whole paper | 11 sections and 43 subsections reduced to 7 sections and 13 subsections as specified; no sub-subsections |
-| 2 | whole paper | 60 bold or italic run-in headings replaced by topic sentences or, where the first sentence already carried the information, removed; see section 2. Italic lead-ins inside paragraphs (profiling, sessions, "A limitation of this family") set upright, wording unchanged |
+| 2 | whole paper | 11 numbered sections and 50 subsections reduced to 7 sections and 13 subsections as specified; no sub-subsections |
+| 2 | whole paper | 54 bold or italic run-in paragraph headings (one of them the deleted research-questions heading) replaced by topic sentences or, where the first sentence already carried the information, removed; see section 2. Seven italic lead-ins inside paragraphs (profiling, sessions, "A limitation of this family") set upright, wording unchanged |
 | 2 | I par. 7 | C1 to C3 kept as a list; bold titles turned into plain lead-ins |
 | 2 | V-G | A1 to A5 kept as an enumerated sequence; bold titles turned into plain sentences |
 | 2 | IV-B, IV-C, V-F, VI | Six short topic sentences added where a subsection title disappeared ("The metrics are defined as follows.", "The second tool of the analysis is a CPU accounting identity.", "There were five deviations from the pre-registration.", "A session changes what a compromise exposes.", "We first examine run-to-run variation.", "Order and time effects were checked as follows.") and "rule" to "stall rule" in VI par. 2 |
