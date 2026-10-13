@@ -319,6 +319,7 @@ def mechanism(tx: dict, ta: dict, families: dict, out: Path, results: Path, m: M
     m.add("RevModelErrHotRsa", num(100 * max(abs(r["error"]) for r in hot if r["mode"] == "R1"), 1))
     m.add("RevModelErrMidLo", num(100 * min(abs(r["error"]) for r in mid if r["mode"] != "R1"), 1))
     m.add("RevModelErrMidHi", num(100 * max(abs(r["error"]) for r in mid if r["mode"] != "R1"), 1))
+    m.add("RevModelErrMidRsa", num(100 * max(abs(r["error"]) for r in mid if r["mode"] == "R1"), 1))
     for plat, name in (("x86", "Rev"), ("ARM", "Arm")):
         r = next(r for r in hot if r["platform"] == plat and r["mode"] == "P1")
         m.add(f"{name}ModelHotCpuRatio", f"{r['cpu_ratio']:.3f}")
@@ -462,6 +463,17 @@ def metadata(meta_csv: Path, out: Path, m: Macros) -> None:
     m.add("RevMetaExtraMLKEM", num(extra))
     m.add("RevMetaExtraXwing", num(sizes["P3"] - sizes["B2"]))
     m.add("RevMetaXwingOverMLKEM", num(sizes["P3"] - sizes["P1"]))
+    # Raw key-establishment ciphertext against its base64 text in the JSON manifest.
+    raw = {"B2": 32, "P1": 1088, "P3": 1120}
+    b64 = {k: 4 * math.ceil(v / 3) for k, v in raw.items()}
+    intrinsic = raw["P1"] - raw["B2"]
+    m.add("RevMetaIntrinsic", num(intrinsic))
+    m.add("RevMetaIntrinsicXwing", num(raw["P3"] - raw["B2"]))
+    m.add("RevMetaEncodingOverhead", num(extra - intrinsic))
+    m.add("RevMetaBaseSixtyFour", num(b64["P1"]))
+    m.add("RevMetaNameBytes", extra - (b64["P1"] - b64["B2"]))
+    m.add("RevMetaIntrinsicBillionTB", f"{intrinsic * 1e9 / 1e12:.2f}")
+    m.add("RevMetaFixedBytes", num(sizes["B2"] - b64["B2"]))
     m.add("RevMetaBillionTB", f"{extra * 1e9 / 1e12:.2f}")
     m.add("RevMetaBillionTiB", f"{extra * 1e9 / 2**40:.2f}")
     m.add("RevMetaMillionGB", f"{extra * 1e6 / 1e9:.2f}")

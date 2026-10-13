@@ -40,8 +40,9 @@ Hyderabad, India\\
 \maketitle
 
 \begin{abstract}
-Ciphertext stored in cloud object stores today can be decrypted once a large quantum computer
-exists. Where objects are encrypted to a recipient's public key, migration means replacing RSA or
+Objects stored today under keys established with RSA or elliptic curves can be decrypted once a
+large quantum computer exists. Where objects are encrypted to a recipient's public key, migration
+means replacing RSA or
 elliptic-curve key establishment with ML-KEM (FIPS~203) on every object. That cost has been
 measured for isolated primitives and for TLS connections, but not on a concurrent object-store
 data path. We present a reproducible, instrumented evaluation of per-object post-quantum key
@@ -250,8 +251,8 @@ but they contain no storage, concurrency or end-to-end request latency.
 and post-quantum signatures in TLS~1.3 under emulated latency and loss, and Sikeridis et
 al.~\cite{sikeridis2020} study post-quantum authentication and its effect on server throughput.
 Sosnowski et al.~\cite{sosnowski2023} add a white-box decomposition of the TLS~1.3 handshake, and
-Giron et al.~\cite{giron2023} evaluate hybrid KEMTLS in simulated and geographically separated
-networks. These are the closest systems precedents, but their amortization boundary differs: a
+Giron et al.~\cite{giron2023} evaluate hybrid KEMTLS~\cite{schwabe2020} in simulated and
+geographically separated networks. These are the closest systems precedents, but their amortization boundary differs: a
 handshake protects a connection, whereas in client-side object encryption key establishment and
 its ciphertext recur for each object.
 
@@ -352,11 +353,17 @@ hash of the key-establishment ciphertext $C$; it is bound into the data key and 
 Objects are split into 4\,MiB chunks, and chunk $j$ is encrypted with nonce
 $p\|\mathrm{be}_{64}(j)$ under a random 32-bit prefix $p$ and associated data
 $\mathit{ctx}\|j\|\ell_j\|\mathit{final}_j$, so deletion, reordering, truncation, extension and
-cross-object splicing of chunks fail authentication. Each version is stored under
+cross-object splicing of chunks fail authentication. This is the counter-and-final-flag pattern
+of the STREAM construction~\cite{hoang2015}, with the flag carried in the associated data
+instead of the nonce; we do not claim STREAM's proof for our variant. Each version is stored under
 \texttt{key.pqcs/version/} as a ciphertext stream \texttt{data.enc} and a manifest
 \texttt{manifest.json} holding $\mathit{ctx}$, $C$, the salt and the prefix. The manifest is
 written last and serves as the commit record: readers only consider versions whose manifest
-exists, so an interrupted upload is never visible. One logical PUT is therefore two S3 writes.
+exists, so an interrupted upload is never visible. One logical PUT is therefore two S3 writes
+(the data, in parts above 8\,MiB, then the manifest), and one GET of a known version is two S3
+reads (the manifest, then the data). Finding the newest version needs an additional LIST, which
+the benchmark avoids by reading versions it knows; a client that always asks for ``the latest''
+would pay it.
 
 \begin{algorithm}[t]
 \caption{Per-object PUT and GET (mode P1)}
@@ -407,8 +414,12 @@ differs in three ways. (1)~The data key is derived with a single HKDF-SHA256 cal
 that also outputs a base nonce. (2)~Chunk nonces are a random prefix followed by a counter, where
 HPKE computes base nonce XOR sequence number. (3)~The chunk index, length and final-chunk flag
 are authenticated in the associated data; HPKE leaves truncation protection to the application.
-Mode P1 uses a KEM that~\cite{hpkepq} defines for HPKE (ML-KEM-768); that draft also defines an
-X25519+ML-KEM-768 hybrid, whose relation to X-Wing as we implement it we did not verify. We did not
+Mode P1 uses a KEM that~\cite{hpkepq} defines for HPKE (ML-KEM-768). That draft also defines an
+X25519+ML-KEM-768 hybrid under the KEM identifier that the X-Wing draft~\cite{xwing} requests,
+so P3 corresponds to it; we did not test interoperability. A deployed example of this approach is
+the file-encryption tool age, whose version 1.3.0 added HPKE-based hybrid ML-KEM-768 recipients
+\cite{age2025}. It shows that a per-file post-quantum KEM is already practice; we found no
+performance study of it under concurrent load. We did not
 implement or benchmark HPKE. Since an HPKE-based envelope would perform the same KEM operation
 once per object, a key schedule of a few hash calls and the same AEAD, we expect the per-object
 costs reported here to transfer, but that expectation is untested, and a new design should use
@@ -593,7 +604,11 @@ requests, none of which failed, including the \RevOpenRuns{} open-loop runs, whe
 request was eventually served) was pre-registered: hypotheses, primary cells, test, margin, multiplicity correction,
 repetitions, stall rule, the training and held-out split for the queueing model and the session
 grid were written into the project's versioned specification and committed before any of its
-data existed. Table~\ref{tab:batches} lists its batches.
+data existed. The commit that contains it was pushed to a hosted repository (GitHub) on
+10~October 2026 at 16:19~UTC, and the first run of the campaign started on 11~October at
+11:53~UTC; the hosting service's push log, which the authors cannot edit, records that order.
+The repository is private at the time of writing, so a reader cannot yet check this.
+Table~\ref{tab:batches} lists its batches.
 
 \begin{table}[t]
 \caption{Batches of the confirmatory campaign. Batches A--D are listed in Table~\ref{tab:sources}.}
@@ -865,7 +880,8 @@ with ratios between \RevLargeRatioLo{} and \RevLargeRatioHi{} on x86 and between
 \emph{A real difference where the client is the bottleneck.} At 64\,KiB GET with 500 workers
 ML-KEM delivers \RevHotDeficit\,\% less than X25519 on x86 (90\,\% CI \RevHotCI) and
 \ArmHotDeficit\,\% less on ARM (\ArmHotCI). The intervals are narrow, so this is a measured
-cost, not noise: on x86 it lies just inside the margin and is formally equivalent, on ARM the
+cost, not noise: on x86 it lies just inside the margin, so the cell is formally equivalent and at
+the same time significantly different from 1 (its 95\,\% interval excludes 1), on ARM the
 interval touches the bound and the verdict is inconclusive, and in neither case does it pass at
 $\pm$2\,\%. At 128 workers the same workload shows no difference.
 
@@ -948,12 +964,13 @@ runs it describes, its error measures only how equal the core counts are. We use
 things. It shows that the deficit has no other source than client CPU, and it reduces the
 question ``will this mode cost throughput?'' to a CPU measurement plus a check for saturation.
 It would become a prediction only if tested on a configuration it was not computed from, which
-we have not done. Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use the same \RevHotCores{} of 16 cores on x86 and
-\ArmHotCores{} on ARM, it reproduces the observed ratio of ML-KEM and of both hybrids to within
+we have not done. Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use nearly the same number of cores (within 0.1 of
+each other for the post-quantum modes, Table~\ref{tab:model}), it reproduces the observed ratio of ML-KEM and of both hybrids to within
 \RevModelErrHot{} percentage points on both architectures, and RSA-4096, which needs more than
 twice the CPU, to within \RevModelErrHotRsa. At 128 workers the client is not yet saturated: the
 costlier mode simply uses more cores, throughput holds, and the identity, which assumes equal
-cores, overstates the loss by \RevModelErrMidLo--\RevModelErrMidHi{} points. The deficit of Section~\ref{sec:primary} is
+cores, overstates the loss by \RevModelErrMidLo--\RevModelErrMidHi{} points for the
+post-quantum modes and \RevModelErrMidRsa{} for RSA-4096. The deficit of Section~\ref{sec:primary} is
 therefore fully accounted for by client CPU: ML-KEM needs \RevHotCpuDelta\,\textmu s more per
 request than X25519 on x86 at 500 workers (of \RevHotCpuPerRequest\,ms) and
 \ArmHotCpuDelta\,\textmu s more on ARM.
@@ -1058,11 +1075,15 @@ throughput. Where the client CPU is saturated, X-Wing costs
 Table~\ref{tab:resources} lists CPU and memory for representative workloads of the exploratory
 campaign. Per request, P1 uses between \HfourBtwoMin{} and \HfourBtwoMax\,ms more client CPU than
 X25519 at one worker, and \HfourRoneGetMin--\HfourRoneGetMax\,ms less than RSA-4096 on GET.
-Server CPU does not depend on the mode. Client memory is dominated by the interpreter and
-buffers: about \MemPeakSmallSat\,MiB at 500 workers, within \MemModeSpreadPct\,\% across modes;
+Under contention the gap is larger: at 500 workers on 64\,KiB GET, ML-KEM needs
+\RevHotCpuDelta\,\textmu s more than X25519 on x86 and \ArmHotCpuDelta\,\textmu s more on ARM
+(Section~\ref{sec:mechanism}). Server CPU does not depend on the mode. Client memory is
+dominated by the interpreter and buffers: about \MemPeakSmallSat\,MiB at 500 workers, within \MemModeSpreadPct\,\% across modes;
 streaming keeps the growth of a single 500\,MiB PUT at most \MemGrowthLargeOne\,MiB. Server
 memory growth has overlapping intervals across modes in \ServerGrowthOverlap{} of
-\ServerGrowthWorkloads{} workloads.
+\ServerGrowthWorkloads{} workloads. The one large value in Table~\ref{tab:resources}, P1 on
+1\,MiB PUT, is a single run in which MinIO grew its heap by \ServerGrowthOneRun\,MiB; the other
+four runs of that cell grew by at most \ServerGrowthOtherRuns\,MiB.
 
 \begin{table*}[t]
 \caption{Exploratory campaign: CPU (\% of the host's 16 vCPU, measured window), client CPU time per request and memory (peak RSS and growth over the run), mean of five runs}
@@ -1071,34 +1092,46 @@ memory growth has overlapping intervals across modes in \ServerGrowthOverlap{} o
 \input{generated/tab-resources.tex}
 \end{table*}
 
-\finding{7}{ML-KEM's CPU cost per request is within a few hundredths of a millisecond of
-X25519's, and neither client nor server memory depends on the key-establishment mode.}
+\finding{7}{At one worker ML-KEM's CPU cost per request is within a few hundredths of a
+millisecond of X25519's; under contention the gap grows to about a tenth of a millisecond.
+Neither client nor server memory depends on the key-establishment mode.}
 
 \subsection{Metadata at Scale (RQ1)}
 The lasting cost of post-quantum key establishment is storage. Table~\ref{tab:meta} converts the
 per-object manifest into fleet totals. An ML-KEM manifest is \RevMetaMLKEM\,bytes,
-\RevMetaExtraMLKEM{} more than X25519; X-Wing adds another \RevMetaXwingOverMLKEM. For one
-billion objects that is \RevMetaBillionTB\,TB (\RevMetaBillionTiB\,TiB) of additional metadata.
+\RevMetaExtraMLKEM{} more than X25519; X-Wing adds another \RevMetaXwingOverMLKEM. Two parts of
+that difference must be kept apart. The \emph{intrinsic} cost of ML-KEM is its ciphertext,
+\RevMetaIntrinsic{} bytes more than an X25519 public key. The remaining
+\RevMetaEncodingOverhead{} bytes are our encoding: the manifest is JSON and carries the
+ciphertext in base64 (\RevMetaBaseSixtyFour{} characters), plus \RevMetaNameBytes{} bytes for a
+longer algorithm name. For one billion objects the difference is \RevMetaBillionTB\,TB
+(\RevMetaBillionTiB\,TiB) in this encoding and \RevMetaIntrinsicBillionTB\,TB with a binary
+one.
 Relative to the payload it is negligible from 1\,MiB upward and larger than the payload itself at
 1\,KiB. These are logical bytes: replication or erasure coding multiplies them, and because the
 manifest is a separate S3 object in our design, it also doubles the number of stored objects and
 write requests, which matters under per-request billing and for inventory scans. Carrying the
-manifest in the object's own metadata would avoid the second object, but Amazon S3 limits
-user-defined metadata to 2\,KB per object~\cite{s3metadata}; our JSON manifests for ML-KEM and
-both hybrids (\RevMetaMLKEM--\RevMetaStudyHybrid\,bytes) are at or above that limit, so such a
-design needs a compact binary encoding, and has little room left even then, since the ML-KEM
-ciphertext alone is 1{,}088 bytes before any text encoding.
+manifest in the object's own metadata, as the Amazon S3 Encryption Client does by
+default~\cite{s3ec}, would avoid the second object. Amazon S3 limits user-defined metadata to
+2\,KB per object~\cite{s3metadata}: our JSON manifests for ML-KEM and both hybrids
+(\RevMetaMLKEM--\RevMetaStudyHybrid\,bytes) are at or above that limit, whereas a binary
+manifest (a 1{,}088-byte ciphertext and a few hundred bytes of context) would fit, provided the
+store accepts binary metadata values or the client pays the base64 expansion once more in the
+header. Our storage results therefore describe a two-object, JSON-manifest design, which we
+chose so that an interrupted upload is never visible and a manifest can be read without the
+data; they overstate both the bytes and the request count of a metadata-based design.
 
 \begin{table}[t]
-\caption{Manifest size per object and its scaling. Extra bytes are relative to X25519.}
+\caption{Manifest size per object and its scaling, for this study's JSON/base64 manifest. Extra bytes are relative to X25519; \RevMetaIntrinsic{} of ML-KEM's \RevMetaExtraMLKEM{} are ciphertext, the rest is encoding.}
 \label{tab:meta}
 \centering\footnotesize
 \setlength{\tabcolsep}{2.5pt}
 \resizebox{\columnwidth}{!}{\input{generated/tab-meta.tex}}
 \end{table}
 
-\finding{8}{ML-KEM-768 adds \RevMetaExtraMLKEM{} bytes of metadata per object: irrelevant for
-large objects, dominant for kilobyte-sized ones, and \RevMetaBillionTB\,TB per billion objects
+\finding{8}{ML-KEM-768 adds \RevMetaIntrinsic{} bytes of ciphertext per object, and
+\RevMetaExtraMLKEM{} in our JSON encoding: irrelevant for large objects, dominant for
+kilobyte-sized ones, and \RevMetaIntrinsicBillionTB--\RevMetaBillionTB\,TB per billion objects
 before redundancy.}
 
 \subsection{Open-Loop Capacity (RQ3)}\label{sec:queue}
@@ -1261,7 +1294,11 @@ instance, it tests the robustness of the ratios and not ARM against x86 in absol
 
 \subsection{Threats to Validity}
 \textbf{Internal.} Stage timers above one worker include interpreter-lock waiting, so
-key-establishment time is reported at one worker only. Modes differ in manifest size as well as
+key-establishment time is reported at one worker only. During the x86 chain of the confirmatory
+campaign, completed batches were downloaded from the client while parts of batches F, G and H
+were running; the transfer used client CPU and network and may have added noise to those runs.
+Mode order is randomized within repetitions, so it cannot favour a mode, and no transfer
+overlapped the primary-family batches. Modes differ in manifest size as well as
 in key establishment, and we have no control that separates the two
 (Section~\ref{sec:mechanism}). Seven of the eight primary cells could not have shown an effect
 of the mode on throughput. The exploratory campaign's pause failure
