@@ -293,7 +293,7 @@ def main() -> None:
     fa.flag_stalls(runs)
     table = fa.cells(runs)
     fa.mark_saturation(table)
-    iperf = json.loads(max(args.baselines.glob("iperf3-*.json")).read_text())
+    iperf = json.loads(max(args.baselines.glob("iperf3-202609*.json")).read_text())
     link_mib = iperf["end"]["sum_received"]["bits_per_second"] / 8 / MIB
     for c in table.values():
         c["limit"] = fa.limit_label(c, link_mib) if c["loop"] == "closed" else "open loop"
@@ -312,7 +312,7 @@ def main() -> None:
     dockerfile = Path("docker/minio.Dockerfile").read_text()
     m.add("ClientType", config_env["CLIENT_TYPE"])
     m.add("ServerType", config_env["SERVER_TYPE"])
-    m.add("Region", config_env["REGION"])
+    m.add("Region", "ap-south-2")   # batches A-D (Hyderabad); config.env now holds the revision region
     m.add("ClientCPU", env["cpu_model"].replace("(R)", "").replace("Intel ", "Intel "))
     m.add("ClientVCPU", env["logical_cores"])
     m.add("ClientRAMGiB", num(env["ram_bytes"] / 2**30, 0))
@@ -324,9 +324,9 @@ def main() -> None:
     m.add("MinioRelease", re.search(r"RELEASE\.[0-9T-]+Z", dockerfile).group(0).replace("_", "\\_"))
     m.add("LinkGbit", num(iperf["end"]["sum_received"]["bits_per_second"] / 1e9, 1))
     m.add("LinkMiB", num(link_mib, 0))
-    ping = max(args.baselines.glob("ping-*.txt")).read_text()
+    ping = max(args.baselines.glob("ping-202609*.txt")).read_text()
     m.add("RTTms", num(float(re.search(r"= [\d.]+/([\d.]+)/", ping).group(1)), 2))
-    fio = json.loads(max(args.baselines.glob("fio-*.json")).read_text())["jobs"][0]
+    fio = json.loads(max(args.baselines.glob("fio-202609*.json")).read_text())["jobs"][0]
     m.add("FioReadMiB", num(fio["read"]["bw"] / 1024, 0))
     m.add("FioWriteMiB", num(fio["write"]["bw"] / 1024, 0))
     commits = sorted({manifests[b]["git_commit"][:7] for b in manifests})
