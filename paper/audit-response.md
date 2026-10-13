@@ -246,12 +246,14 @@ instance, disk or snapshot remains.
 
 - **Before:** ML-KEM is 4–5 % slower on a saturated client; the cause is probably its larger
   manifest; unproven.
-- **Now:** the Python client's deficit is an artifact of the binding, which makes four foreign
+- **Now:** on x86, the Python client's deficit is an artifact of the binding, which makes four foreign
   calls per decapsulation. The manifest is a minor part. A native client does show a cost
-  (9.5 % for ML-KEM, 17.4 % for X-Wing on one core), because Go's ML-KEM takes more CPU than its
-  X25519, where liboqs's takes less. In every case the throughput ratio equals the inverse
-  ratio of client CPU per request. The cost is a property of the implementation, appears only
-  under client saturation, and can have either sign.
+  (9.5 % for ML-KEM, 17.4 % for X-Wing on one core). A slower ML-KEM key recovery in Go's
+  standard library accounts for about half of that (17 of 36 µs for ML-KEM, 52 of 72 µs for
+  X-Wing); the rest was not measured separately. In every case the throughput ratio equals the inverse
+  ratio of client CPU per request. The cost is a property of the implementation and appears only
+  under client saturation; it ranged from none to 9.5 % for ML-KEM. In no saturated cell was
+  ML-KEM faster than X25519. Both controls ran on x86 only.
 
 The earlier text's leading hypothesis (the manifest) was wrong. It was labelled a hypothesis and
 is now reported as refuted for the most part.

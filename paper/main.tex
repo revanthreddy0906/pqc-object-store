@@ -53,17 +53,19 @@ pre-registered controls and a native Go reader. In paired equivalence tests ($\p
 Holm-corrected) ML-KEM's throughput is equivalent to X25519 in \RevPrimaryEq{} of 8
 pre-specified cells on each architecture and non-equivalent in none, but only one of those
 cells has a saturated client, so the others mostly confirm where the bottleneck is. In that one
-cell the Python client is \RevHotDeficit--\ArmHotDeficit\,\% slower with ML-KEM. Two controls
-explain why: a manifest padded to ML-KEM's size accounts for \AudPadShare\,\% of the deficit,
-and calling the same ML-KEM through one foreign call, where the library binding makes four,
-removes it (\AudBindReleasedRatio{} of X25519's throughput). The deficit is thus an artifact of
-the binding. It is not, however, absent in general: a native reader restricted to one core is
-\AudNOneMlkemDeficit\,\% slower with ML-KEM and \AudNOneXwingDeficit\,\% with X-Wing, because its
-ML-KEM implementation costs more CPU than its X25519. The throughput cost of per-object
-post-quantum key establishment is therefore the ratio of client CPU per request, visible only
-when the client is saturated, and it depends on the implementation, not on the algorithm
-alone. ML-KEM's lasting cost is \RevMetaIntrinsic{} bytes of ciphertext per object. Findings are
-limited to these two clients, a single-node store and one cloud provider.
+cell the Python client is \RevHotDeficit\,\% (x86) and \ArmHotDeficit\,\% (ARM) slower with
+ML-KEM. Two controls on x86 explain why: a manifest padded to ML-KEM's size accounts for
+\AudPadShare\,\% of the deficit, and calling the same ML-KEM through one foreign call, where
+the library binding makes four, removes it (\AudBindReleasedRatio{} of X25519's throughput).
+There the deficit is an artifact of the binding. It is not absent in general: a native reader
+restricted to one core is \AudNOneMlkemDeficit\,\% slower with ML-KEM and
+\AudNOneXwingDeficit\,\% with X-Wing, about half of which a slower key recovery in its library
+accounts for. In every saturated cell the throughput loss equals the extra client CPU per
+request, so the cost of per-object post-quantum key establishment appears only when the client
+is saturated and depends on the implementation, not on the algorithm alone. What every
+implementation pays is storage: ML-KEM's ciphertext is \RevMetaIntrinsic{} bytes larger per
+object than an X25519 key. Findings are limited to these two clients, a single-node store and
+one cloud provider.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -985,8 +987,9 @@ This is an accounting identity once saturation holds, not a predictive model: ev
 runs it describes, its error measures only how equal the core counts are. We use it for two
 things. It shows that the deficit has no other source than client CPU, and it reduces the
 question ``will this mode cost throughput?'' to a CPU measurement plus a check for saturation.
-It becomes a prediction only when tested on data it was not computed from; we do that once,
-below, and it also holds in the native reader of Section~\ref{sec:native}.
+It becomes a prediction only when tested on data it was not computed from. We did that once:
+a ratio predicted before batches J and L missed the observed values by less than a percentage
+point but lay outside their intervals (see below).
 Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use nearly the same number of cores (within 0.1 of
 each other for the post-quantum modes, Table~\ref{tab:model}), it reproduces the observed ratio of ML-KEM and of both hybrids to within
 \RevModelErrHot{} percentage points on both architectures, and RSA-4096, which needs more than
@@ -1065,8 +1068,10 @@ against \AudBindEcdhKeOne\,ms for X25519.
 \input{generated/tab-control.tex}
 \end{table*}
 
-\textbf{What the controls establish.} The client-bound deficit of ML-KEM in our measurements is
-an artifact of how the Python binding invokes the library. It is not a cost of ML-KEM, whose
+\textbf{What the controls establish.} On the x86 client, where both controls ran, the
+client-bound deficit of ML-KEM is an artifact of how the Python binding invokes the library.
+The ARM client uses the same binding and shows a similar deficit, but we did not run the
+controls there. It is not a cost of ML-KEM, whose
 decapsulation is cheaper than an X25519 exchange, and only \AudPadShare\,\% of it comes from
 the larger manifest. The two controls are independent and their effects need not add up exactly:
 the one-call modes carry the larger manifest and still match X25519, because their cheaper
@@ -1076,10 +1081,11 @@ batches J and L, \AudPredicted{} from the CPU ratio of batch E, missed the obser
 \AudPredictionErrorJ{} and \AudPredictionErrorL{} points and lay \AudPredictionInsideL{} their
 intervals: the CPU decomposition holds within a batch but is not exact across batches.
 
-\finding{3}{The \RevHotDeficit--\ArmHotDeficit\,\% client-bound deficit of ML-KEM is produced by the Python binding, which
+\finding{3}{On x86, the \RevHotDeficit\,\% client-bound deficit of ML-KEM in the Python client is produced by the binding, which
 makes four foreign calls per decapsulation: with one call it vanishes
 (\AudBindReleasedRatio{} of X25519's throughput). The larger manifest accounts for
-\AudPadShare\,\% of it; decapsulation itself is cheaper than X25519.}
+\AudPadShare\,\% of it; decapsulation itself is cheaper than X25519. The ARM client uses the
+same binding and showed \ArmHotDeficit\,\%, but the controls were not run there.}
 
 \subsection{A Native Client (RQ2)}\label{sec:native}
 If the Python client's deficit is a binding artifact, does a compiled client show none? We
@@ -1102,9 +1108,11 @@ Table~\ref{tab:native}).
 (90\,\% CI \AudNOneMlkemThrCI) and X-Wing \AudNOneXwingThr{} (\AudNOneXwingThrCI): by the
 pre-registered rule, a \emph{\AudNOneMlkemVerdict} for both. Their CPU per request is higher by
 the inverse factors (\AudNOneMlkemCpu{} and \AudNOneXwingCpu), so the decomposition of
-Section~\ref{sec:mechanism} holds here as well. The native reader spends
-\AudNOneCpuUs\,\textmu s of CPU per request with X25519, against \RevHotCpuPerRequest\,ms for
-the Python client, so a given absolute cost is a five times larger share of it.
+Section~\ref{sec:mechanism} holds here as well, by construction, since every mode ran on
+exactly one core. On one core the native reader spends \AudNOneCpuUs\,\textmu s of process CPU
+per request with X25519; the Python client's figure of \RevHotCpuPerRequest\,ms is thread CPU
+at 500 workers and is not measured the same way, but the native reader clearly has much less
+overhead per request, so a given absolute cost is a larger share of it.
 
 \textbf{Why the sign differs from the Python control.} With liboqs called directly, ML-KEM
 decapsulation was \emph{cheaper} than X25519 (\AudBindReleasedKeOne\,ms against
@@ -1121,12 +1129,16 @@ larger manifest but was not measured separately in this client.
 \AudNHotXwingDeficit\,\% of each other, as expected when the store sets the pace. At 128 workers
 ML-KEM is \AudNMidMlkemDeficit\,\% and X-Wing \AudNMidXwingDeficit\,\% slower, with wider
 intervals; we have no explanation for a difference of that size in a cell that is not
-CPU-saturated by our criterion, and note that the 16 virtual CPUs are 8 physical cores.
+CPU-saturated by our criterion. Two cautions apply: the 16 virtual CPUs are 8 physical cores,
+and the reader's CPU per request is two to three times higher with 16 cores than with one,
+which suggests runtime overhead that makes ``cores in use'' a soft measure of saturation
+here.
 
 \finding{4}{A native reader saturated on one core is \AudNOneMlkemDeficit\,\% slower with ML-KEM
 and \AudNOneXwingDeficit\,\% with X-Wing. The cost of post-quantum key establishment under
-client saturation is real but implementation-specific: it follows CPU per request, which was
-lower for ML-KEM than for X25519 with one library and higher with another.}
+client saturation is real but implementation-specific: it follows CPU per request, and ranged
+from none (liboqs through one call) to \AudNOneMlkemDeficit\,\% (Go's standard library) for the
+same algorithm.}
 
 \subsection{Hybrid Key Establishment (RQ2)}\label{sec:hybrid}
 \textbf{Cost per object.} X-Wing takes \RevKeXwingPut\,ms on PUT and \RevKeXwingGet\,ms on GET on
@@ -1390,25 +1402,26 @@ off that estimate. First, the regime in which the cost appears is narrow and ide
 a CPU-saturated client, and then in proportion to client CPU per request. Second, the first
 cause we suspected was wrong. The 1{,}088-byte ciphertext and its handling explain
 \AudPadShare\,\% of the Python client's deficit; the rest came from a binding that crosses into
-native code four times per decapsulation. Third, the sign of the effect depends on the library:
-ML-KEM was cheaper than X25519 with liboqs called directly and dearer in Go's standard library,
-and the native client, having less overhead per request, shows the larger relative cost.
+native code four times per decapsulation. Third, the size of the effect depends on the library:
+the ML-KEM operation was cheaper than an X25519 exchange with liboqs called directly and dearer
+in Go's standard library, and the throughput cost under saturation ranged accordingly from none
+to \AudNOneMlkemDeficit\,\%. In no saturated cell was ML-KEM faster than X25519.
 
 \textbf{Migration planning.} The procedure these results support is short. Measure client CPU
 per request for the current and the candidate mode on the real workload and client. If clients
 are not CPU-bound, expect no change in throughput. If they are, expect throughput to change by
 about the inverse ratio of the two CPU figures: \RevHotDeficit--\ArmHotDeficit\,\% in our Python
 client, \AudNOneMlkemDeficit\,\% in our native reader on one core, and nothing with a one-call
-binding. A measurement on one client stack does not transfer to another.
+binding on x86. A measurement on one client stack does not transfer to another.
 
 \textbf{For library authors.} A binding that allocates an object and makes several foreign calls
 per operation can cost more under thread contention than the cryptography it wraps. Holding a
 handle per process and making one call per operation removed the entire deficit in our client;
 whether that call released the interpreter lock made no measurable difference.
 
-\textbf{Where the cost lies.} The lasting cost of ML-KEM is its ciphertext: \RevMetaIntrinsic{}
-bytes per object, or \RevMetaExtraMLKEM{} in a JSON/base64 manifest, which a binary encoding
-avoids. For hybrids there is in addition a client-CPU increment under saturation. RSA-4096 is
+\textbf{Where the cost lies.} The lasting cost of ML-KEM is its 1{,}088-byte ciphertext:
+\RevMetaIntrinsic{} bytes more per object than an X25519 key, or \RevMetaExtraMLKEM{} more in a
+JSON/base64 manifest. For hybrids there is in addition a client-CPU increment under saturation. RSA-4096 is
 the poor choice: its private-key operation makes small-object reads CPU-bound at
 \RevRsaGetLo--\RevRsaGetHi{} of ML-KEM's throughput in the Python client.
 
@@ -1422,16 +1435,17 @@ post-quantum modes in either client.
 We evaluated per-object post-quantum key establishment on an S3-compatible store with a Python
 client (Python \PythonVersion, liboqs \LiboqsVersion) on x86 and ARM and with a native Go
 reader, against a single-node MinIO server on AWS. ML-KEM-768 is equivalent to X25519 within
-$\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, and in the two
-small-object write cells that were inconclusive once they were repeated with adequate power;
-but only a saturated client can show a difference at all. Where the Python client did,
-\RevHotDeficit--\ArmHotDeficit\,\%, two pre-registered controls traced it to the library
-binding and not to ML-KEM or, for the most part, its larger ciphertext. A native reader on one
-core was \AudNOneMlkemDeficit\,\% slower with ML-KEM and \AudNOneXwingDeficit\,\% with X-Wing,
-which its implementations' CPU cost explains. The throughput cost of post-quantum key
-establishment in this setting is therefore a property of the client implementation, bounded by
-the ratio of CPU per request and absent unless the client is saturated; the cost that every
-implementation pays is \RevMetaIntrinsic{} bytes of ciphertext per object.
+$\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, and, on x86, in
+the two small-object write cells once they were repeated with adequate power; but only a
+saturated client can show a difference at all. Where the Python client did
+(\RevHotDeficit\,\% on x86, \ArmHotDeficit\,\% on ARM), two pre-registered controls on x86
+traced it to the library binding and not to ML-KEM or, for the most part, its larger
+ciphertext. A native reader on one core was \AudNOneMlkemDeficit\,\% slower with ML-KEM and
+\AudNOneXwingDeficit\,\% with X-Wing; a slower key recovery in its library accounts for about
+half of that. In this setting the throughput cost of post-quantum key establishment is a
+property of the client implementation: in every saturated cell it equalled the extra CPU per
+request, and it is absent unless the client is saturated. The cost that every implementation
+pays is storage, \RevMetaIntrinsic{} bytes more per object than X25519.
 
 These results describe two clients, one single-node store and one cloud provider, and the
 native reader covers the GET path only. They should not be extended to distributed object

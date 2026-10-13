@@ -1,5 +1,11 @@
 # Response to the Revision and Literature-Gap Report
 
+> **Superseded in part.** This letter describes the first revision. Later experiments (batches J to
+> N) changed several statements below: the two under-powered cells were re-run with 50
+> repetitions and are equivalent, a native reader was added, and the cause of the client-bound
+> deficit was identified. Table and section numbers below refer to that earlier version. For the
+> current results and open points see the addendum of `paper/audit-response.md`.
+
 Manuscript: *Benchmarking Post-Quantum Key Encapsulation in S3-Compatible Object Storage under
 Client Concurrency*.
 

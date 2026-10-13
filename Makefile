@@ -53,14 +53,10 @@ bench-smoke:  ## run config/development.yaml through the full benchmark pipeline
 validate-results:  ## validate the newest experiment directory (or RUN=path)
 	$(PY) -m pqcstore.cli validate $${RUN:-$$(ls -d experiments/*/* | tail -1)}
 
-paper-assets:  ## regenerate paper figures/tables/numbers (EXP=, N1=, MICRO=, MEMORY= override)
-	$(VENV)/bin/pip install --quiet -e ".[analysis]"
-	$(PY) analysis/make_paper_assets.py \
-		--experiment $${EXP:-$$(ls -d experiments/sample-paper/* | tail -1)} \
-		--n1 $${N1:-$$(ls -d experiments/n1-dev/* | tail -1)} \
-		--micro $${MICRO:-$$(ls experiments/microbench/*.json | tail -1)} \
-		--memory $${MEMORY:-$$(ls experiments/memory/*.json | tail -1)} \
-		--out paper/generated
+paper-assets:  ## regenerate every paper figure, table and number from the per-run summaries
+	$(PY) analysis/make_paper_assets.py --out paper/generated
+	$(PY) analysis/revision_assets.py --out paper/generated
+	$(PY) analysis/audit_assets.py --out paper/generated
 
 paper:  ## build paper/main.pdf with tectonic (IEEEtran is fetched on first use)
 	cd paper && tectonic -X compile main.tex
