@@ -317,7 +317,7 @@ def limit_label(cell: dict, link_mib_s: float) -> str:
     return resource
 
 
-# ---------------------------------------------------------------- queueing model (RQ3)
+# ---------------------------------------------------------------- queueing model
 
 def erlang_c(servers: int, load: float) -> float:
     """Probability that an arrival waits in M/M/c (load = lambda * S, in Erlangs)."""
@@ -643,7 +643,7 @@ def build_report(table, runs, h1, h3, h4, hybrid, q_rows, link_mib_s) -> str:
                       "KEM/request (aware vs fixed)", "p99 response ratio aware/fixed"], rows), ""]
 
     # Queueing.
-    out += ["## RQ3 — offered load vs response time and the M/M/c model (batch C, Sweep D)", "",
+    out += ["## Offered load vs response time and the M/M/c model (batch C, Sweep D)", "",
             ("Capacity µ from the two most overloaded rates of the same batch; c = round(µ·S0); "
              "M/M/c is evaluated at every ρ < 1. Response time = queue wait + service. A run is "
              "stable when it delivers ≥ 97% of the offered rate with mean wait < 10 ms; unstable "

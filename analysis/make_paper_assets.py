@@ -596,7 +596,7 @@ def main() -> None:
     sat_aware = must(table, "C", "put", 1024, 128, "N1", 100, loop="open", rate=6000.0, aware=True)
     m.add("QaBoundSat", num(sat_aware["mean_session_bound"], 0))
 
-    # RQ3: queueing.
+    # Queueing.
     words_size = {1024: "Small", 65536: "Mid"}
     for size, word in words_size.items():
         rows_s = [q for q in q_rows if q["size"] == size and q["mode"] == "P1"]
@@ -652,7 +652,7 @@ def main() -> None:
          "object size 1\\,KiB--500\\,MiB; key-establishment time"],
         ["C", num(len([r for r in runs if r["experiment"] == "final-c"])),
          f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-c') / 1e6, 1)}\\,M",
-         "open loop (RQ3); N1 on GET; queue-aware N1"],
+         "open loop; N1 on GET; queue-aware N1"],
         ["D", num(len([r for r in runs if r["experiment"] == "final-d"])),
          f"{num(sum(r['requests'] for r in runs if r['experiment'] == 'final-d') / 1e6, 1)}\\,M",
          "PUT $\\leq$64\\,KiB incl.\\ N1 (40\\,s pause)"],

@@ -92,8 +92,8 @@ def tost_tables(tx: dict, ta: dict, out: Path, results: Path, m: Macros) -> dict
               ["Cell (size, op., workers)", "$n$", "Ratio", "90\\% CI", "95\\% CI",
                "$p_{\\text{Holm}}$", "Verdict", "$\\pm$2\\%", "Ratio", "90\\% CI",
                "$p_{\\text{Holm}}$", "Verdict"], rows, "lrcccclc|cccl",
-              " & \\multicolumn{7}{c|}{x86 client (batches E, EK)} & "
-              "\\multicolumn{4}{c}{ARM client (batches I, IK)}")
+              " & \\multicolumn{7}{c|}{x86 client (\\lab{Primary-x86})} & "
+              "\\multicolumn{4}{c}{ARM client (\\lab{Primary-ARM})}")
 
     # Exploratory comparisons: unadjusted p-values, verdict at alpha = 0.05 per test.
     rows = []
@@ -311,7 +311,7 @@ def mechanism(tx: dict, ta: dict, families: dict, out: Path, results: Path, m: M
                              f"{(predicted - thr) * 100:+.1f}".replace("-", "$-$")])
     fa.write_csv(results / "saturation_model.csv", records)
     tex_table(out / "tab-model.tex",
-              ["Client", "Workers", "Mode", "Client cores (B2 / mode)", "CPU ratio", "Predicted",
+              ["Client", "Workers", "Mode", "Client cores (B2 / mode)", "CPU ratio", "Implied by CPU",
                "Observed", "Error (pp)"], rows, "lrlccccr")
     hot = [r for r in records if r["concurrency"] == 500]
     mid = [r for r in records if r["concurrency"] == 128]
