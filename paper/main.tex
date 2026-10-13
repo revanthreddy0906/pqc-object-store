@@ -52,14 +52,15 @@ pre-registered confirmatory campaign on x86 and ARM clients (\RevAllRuns{} runs,
 \RevAllRequests{} million requests). ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms per
 object on x86. In paired equivalence tests ($\pm$5\,\%, Holm-corrected) its throughput is
 equivalent to X25519 in \RevPrimaryEq{} of 8 pre-specified cells on each architecture and
-non-equivalent in none; most of those cells are limited by the network or the server, where no
-key-establishment mode can matter. The informative case is a saturated client: there ML-KEM is
-\RevHotDeficit--\ArmHotDeficit\,\% slower, and the loss equals its extra client CPU per request
-to within \RevModelErrHot{} percentage points. That extra CPU is not decapsulation, which is
-cheaper than X25519, but the handling of a manifest \RevMetaExtraMLKEM{} bytes larger. The
-lasting costs of ML-KEM are therefore metadata and its processing. All findings are limited to
-this client stack, a single-node store and one cloud provider; a native-client replication is
-the main open item.
+non-equivalent in none; but in all except one of those cells the network, the server or spare
+client CPU absorbs any difference, so no key-establishment mode could have changed throughput.
+The informative case is the one cell with a saturated client: there ML-KEM is
+\RevHotDeficit--\ArmHotDeficit\,\% slower, which is accounted for by its higher client CPU per
+request. Decapsulation is not the source, as it is cheaper than X25519; the largest stage
+difference we can measure is the handling of a manifest \RevMetaExtraMLKEM{} bytes larger, but
+most of the extra CPU is unattributed and a control experiment is outstanding. All findings are
+limited to this client stack, a single-node store and one cloud provider; a native-client
+replication is the main open item.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -107,8 +108,8 @@ it fails, by how much, and whether the cause is the KEM computation or the large
 drags through the data path (Section~\ref{sec:related}, Table~\ref{tab:gap}).
 
 \textbf{Thesis.} This paper presents a reproducible systems-level evaluation of post-quantum
-per-object key establishment in concurrent S3-compatible storage workloads, and reduces its
-throughput cost to one measurable quantity, client CPU per request. Its contributions are, in
+per-object key establishment in concurrent S3-compatible storage workloads, and locates its
+throughput cost in client CPU per request. Its contributions are, in
 order of importance:
 \begin{itemize}
 \item[\textbf{C1}] \textbf{End-to-end benchmark.} An instrumented client-side envelope-encryption
@@ -119,8 +120,9 @@ and~\ref{sec:impl}).
 \item[\textbf{C2}] \textbf{Systems evidence and a cost model.} Measurements over object size,
 1--500 concurrent workers, two client architectures, throughput, latency, CPU, memory and
 metadata, with the independently restarted run as the experimental unit and pre-registered paired
-equivalence tests; and a saturation model that predicts the throughput ratio of two modes from
-their client CPU per request (Sections~\ref{sec:method} and~\ref{sec:results}).
+equivalence tests; and a decomposition that accounts for the one throughput difference we observe
+by client CPU per request, which turns a load-test question into a CPU measurement
+(Sections~\ref{sec:method} and~\ref{sec:results}).
 \item[\textbf{C3}] \textbf{Security--performance mechanism.} Bounded session amortization of
 ML-KEM with object and time limits, reported as performance gained against objects and bytes
 exposed per root (Section~\ref{sec:tradeoff}).
@@ -142,11 +144,12 @@ time degrades under open-loop load?
 \ArmKeMLKEMPut--\ArmKeMLKEMGet\,ms on the ARM client, less than X25519 on PUT;
 (ii) its throughput is equivalent to X25519 within $\pm$5\,\% in \RevPrimaryEq{} of 8
 pre-specified cells on each architecture, but this is largely a statement about the bottleneck:
-most of those cells are limited by the network or the server;
+only one of those cells has a saturated client;
 (iii) with a saturated client ML-KEM is \RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
 \RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and in both cases the loss matches the extra
 client CPU per request;
-(iv) ML-KEM's extra CPU is associated with its larger manifest, not with decapsulation;
+(iv) ML-KEM's decapsulation is cheaper than X25519, so its extra CPU lies elsewhere; the largest
+stage difference we measure is manifest handling, and most of the extra CPU is unattributed;
 (v) RSA-4096 is the one mode that moves the bottleneck;
 (vi) the small-object write ceiling lies in the storage server's metadata path, not in its disk;
 and (vii) sessions save a few percent of client CPU and nothing else unless the client is
@@ -156,8 +159,8 @@ saturated.
 which is held constant. All performance statements concern one Python client stack, one
 single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}). Because the
 only regime in which the modes differ is a saturated client, and our client is interpreted,
-the size of that difference on a native client is the most important thing this paper does not
-establish; Section~\ref{sec:pending} lists the experiments that remain.
+the size and even the direction of the change on a native client is the most important thing
+this paper does not establish; Section~\ref{sec:pending} lists the experiments that remain.
 
 \section{Background}\label{sec:background}
 \subsection{Key-Encapsulation Mechanisms and ML-KEM}
@@ -404,7 +407,8 @@ differs in three ways. (1)~The data key is derived with a single HKDF-SHA256 cal
 that also outputs a base nonce. (2)~Chunk nonces are a random prefix followed by a counter, where
 HPKE computes base nonce XOR sequence number. (3)~The chunk index, length and final-chunk flag
 are authenticated in the associated data; HPKE leaves truncation protection to the application.
-The modes P1 and P3 correspond to the KEMs that~\cite{hpkepq} defines for HPKE. We did not
+Mode P1 uses a KEM that~\cite{hpkepq} defines for HPKE (ML-KEM-768); that draft also defines an
+X25519+ML-KEM-768 hybrid, whose relation to X-Wing as we implement it we did not verify. We did not
 implement or benchmark HPKE. Since an HPKE-based envelope would perform the same KEM operation
 once per object, a key schedule of a few hash calls and the same AEAD, we expect the per-object
 costs reported here to transfer, but that expectation is untested, and a new design should use
@@ -697,10 +701,12 @@ closed-loop cells chosen before the campaign: 64\,KiB GET at 128 and 500 workers
 32 workers (the knee of the throughput curve) and 128; 1\,MiB PUT and GET at 32; and 16\,MiB PUT
 and GET at 32. The eight $p$-values are adjusted with Holm's procedure~\cite{holm1979}, which
 controls the family-wise error rate. \emph{A limitation of this family, recognized after the
-campaign:} only the two 64\,KiB GET cells are limited by the client CPU. The 64\,KiB PUT cells
-are limited by the server and the four cells at 1\,MiB and above by the network or the server,
-so in six of eight cells no key-establishment mode could have changed throughput, and
-equivalence there confirms where the bottleneck is and little about ML-KEM. Throughput is also
+campaign:} only one cell, 64\,KiB GET at 500 workers, has a saturated client. The 64\,KiB PUT
+cells are limited by the server and the four cells at 1\,MiB and above by the network or the
+server; at 64\,KiB GET with 128 workers the client is the busiest resource but still has spare
+CPU, which a costlier mode simply uses (Section~\ref{sec:mechanism}). In seven of eight cells,
+therefore, no key-establishment mode could have changed throughput, and equivalence there
+confirms where the bottleneck is and little about ML-KEM. Throughput is also
 an insensitive endpoint in those cells; we therefore add client CPU per request as an
 exploratory second endpoint (Table~\ref{tab:cpuprimary}). The same family measured on the ARM client is a replication
 and is adjusted in the same way. All other comparisons (P3 and P2 against P1 and B2, R1 against
@@ -737,7 +743,7 @@ fixed by the offered rate.
 \textbf{Not pre-specified.} The pre-registration fixed the primary family, its test and the
 training and held-out split. It did not fix the following, which were chosen during analysis and
 are exploratory: applying Holm's correction to the ARM family as well; client CPU per request as a
-second endpoint; the saturation model and the stage comparison of Section~\ref{sec:mechanism};
+second endpoint; the CPU decomposition and the stage comparison of Section~\ref{sec:mechanism};
 the bootstrap check; the definition of the knee as twice the light-load response time; the
 functional form of the load-dependent model; the order-and-time regression of
 Section~\ref{sec:validity}; and the layout of the session and hybrid tables.
@@ -755,7 +761,7 @@ takes \RevKeEcdhPut\,ms on PUT, where the sender also generates an ephemeral key
 times through a Python binding and include its call overhead; they are not primitive benchmarks.
 
 \begin{table}[t]
-\caption{Exploratory campaign: key establishment per request (mean [95\,\% CI], one worker, objects up to 16\,MiB, batch B) and manifest size. Manifests were recorded for a 1\,KiB object, except P2, recorded for a 1\,MiB object; the manifest embeds the plaintext size and chunk count, so that value is 6 bytes larger than P2's in Table~\ref{tab:meta}.}
+\caption{Exploratory campaign: key establishment per request (mean [95\,\% CI], one worker, objects up to 16\,MiB, batch B) and manifest size. Manifests were recorded for a 1\,KiB object, except P2, recorded for a 1\,MiB object; the manifest embeds object-dependent fields such as the plaintext size and the object key, so that value differs by 6 bytes from P2's in Table~\ref{tab:meta}, where all modes are recorded for 1\,KiB objects.}
 \label{tab:handshake}
 \centering\footnotesize
 \resizebox{\columnwidth}{!}{\input{generated/tab-handshake.tex}}
@@ -848,8 +854,8 @@ Table~\ref{tab:tost} and Fig.~\ref{fig:tost} give the pre-registered result. On 
 ML-KEM-768 is equivalent to X25519 in \RevPrimaryEq{} of the 8 cells after Holm correction and
 inconclusive in \RevPrimaryInc; no cell is non-equivalent. The ARM replication also yields
 \ArmPrimaryEq{} equivalent and \ArmPrimaryInc{} inconclusive cells, though not the same ones.
-These counts must be read with the limitation stated in Section~\ref{sec:tost}: six of the eight
-cells are limited by the network or the server, where equivalence was to be expected. Five
+These counts must be read with the limitation stated in Section~\ref{sec:tost}: in seven of the
+eight cells the client is not saturated, and equivalence was to be expected. Five
 observations qualify them.
 
 \emph{Large objects.} All four cells at 1\,MiB and 16\,MiB are equivalent on both architectures,
@@ -925,32 +931,35 @@ inconclusive, \HoneDiff{} different. It showed the same client-bound deficit at 
 
 \finding{4}{In the pre-registered comparison ML-KEM-768 is equivalent to X25519 within
 $\pm$5\,\% in \RevPrimaryEq{} of 8 cells on each architecture and nowhere non-equivalent, mostly
-because those cells are limited by the network or the server. It is
-\RevHotDeficit--\ArmHotDeficit\,\% slower where the client CPU is saturated, and small-object
-write cells are too noisy to decide.}
+because only one of those cells has a saturated client. There it is
+\RevHotDeficit--\ArmHotDeficit\,\% slower, and small-object write cells are too noisy to
+decide.}
 
 \subsection{Why the Saturated Client Is Slower (RQ2)}\label{sec:mechanism}
 The client-bound deficit needs an explanation, because on GET ML-KEM's decapsulation is
 \emph{cheaper} than X25519's exchange (Table~\ref{tab:ke}).
 
-\textbf{A saturation model.} If the client CPU is exhausted, two modes use the same number of
-cores, and throughput is cores divided by CPU per request. The throughput ratio of mode $a$ to
-mode $b$ is then the inverse ratio of their CPU per request,
-\[\frac{X_a}{X_b}=\frac{c_b}{c_a},\]
-which is close to an accounting identity once saturation holds; its use is that it replaces a
-saturation experiment by a measurement of CPU per request. Table~\ref{tab:model} tests it on
-64\,KiB GET. At 500 workers, where all modes use the same \RevHotCores{} of 16 cores on x86 and
-\ArmHotCores{} on ARM, it predicts the observed ratio of ML-KEM and of both hybrids to within
+\textbf{A CPU decomposition.} Throughput is cores in use divided by CPU per request. If the
+client CPU is exhausted, two modes use the same number of cores, and the throughput ratio of
+mode $a$ to mode $b$ is the inverse ratio of their CPU per request,
+\[\frac{X_a}{X_b}=\frac{c_b}{c_a}.\]
+This is an accounting identity once saturation holds, not a predictive model: evaluated on the
+runs it describes, its error measures only how equal the core counts are. We use it for two
+things. It shows that the deficit has no other source than client CPU, and it reduces the
+question ``will this mode cost throughput?'' to a CPU measurement plus a check for saturation.
+It would become a prediction only if tested on a configuration it was not computed from, which
+we have not done. Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use the same \RevHotCores{} of 16 cores on x86 and
+\ArmHotCores{} on ARM, it reproduces the observed ratio of ML-KEM and of both hybrids to within
 \RevModelErrHot{} percentage points on both architectures, and RSA-4096, which needs more than
 twice the CPU, to within \RevModelErrHotRsa. At 128 workers the client is not yet saturated: the
-costlier mode simply uses more cores, throughput holds, and the model over-predicts the loss by
-\RevModelErrMidLo--\RevModelErrMidHi{} points. The deficit of Section~\ref{sec:primary} is
+costlier mode simply uses more cores, throughput holds, and the identity, which assumes equal
+cores, overstates the loss by \RevModelErrMidLo--\RevModelErrMidHi{} points. The deficit of Section~\ref{sec:primary} is
 therefore fully accounted for by client CPU: ML-KEM needs \RevHotCpuDelta\,\textmu s more per
 request than X25519 on x86 at 500 workers (of \RevHotCpuPerRequest\,ms) and
 \ArmHotCpuDelta\,\textmu s more on ARM.
 
 \begin{table}[t]
-\caption{Saturation model on 64\,KiB GET: throughput ratio to X25519 predicted as the inverse ratio of client CPU per request, against the observed ratio (batches E and I)}
+\caption{CPU decomposition on 64\,KiB GET: the inverse ratio of client CPU per request (``predicted'', computed from the same runs) against the observed throughput ratio to X25519 (batches E and I)}
 \label{tab:model}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -976,21 +985,21 @@ unaffected.
 \input{generated/tab-stages.tex}
 \end{table}
 
-\textbf{What this does and does not establish.} The evidence points at the handling of a
-manifest \RevMetaExtraMLKEM{} bytes larger, not at the KEM computation, as the source of
-ML-KEM's client-bound cost. It does not prove it. The stage differences at one worker are about
-10\,\textmu s, while the CPU difference at 500 workers is \RevHotCpuDelta\,\textmu s; at one
-worker the CPU difference itself is too small to resolve with five runs
-(Table~\ref{tab:stages}), and above one worker the stage timers cannot localize it. The rest may
-be the same manifest work made more expensive by contention, or work outside the timed stages
-such as receiving and decoding the larger manifest. A control that pads the X25519 manifest to
+\textbf{What this does and does not establish.} It establishes that decapsulation is not the
+source of ML-KEM's client-bound cost, and that manifest handling is the largest stage difference
+we can measure. It does not establish that the manifest is the cause. The timed stage
+differences at one worker sum to about 10\,\textmu s, while the CPU difference at 500 workers
+is \RevHotCpuDelta\,\textmu s, so most of it is unattributed; at one worker the CPU difference
+itself cannot be resolved with five runs (Table~\ref{tab:stages}), and above one worker the
+stage timers cannot localize it. The remainder may be manifest work made more expensive by
+contention, work outside the timed stages such as receiving the larger manifest, or something
+else in the KEM binding that only appears under contention. A control that pads the X25519 manifest to
 ML-KEM's size would separate ciphertext size from KEM computation directly; we have not run it
 (Section~\ref{sec:pending}).
 
-\finding{5}{With a saturated client, the throughput ratio of two modes equals the inverse ratio
-of their client CPU per request to within \RevModelErrHot{} percentage points. ML-KEM's extra
-CPU on GET is not decapsulation; the largest measured stage difference is the handling of its
-larger manifest.}
+\finding{5}{The client-bound deficit is entirely a difference in client CPU per request.
+Decapsulation is not its source. The largest stage difference we can measure is the handling of
+ML-KEM's larger manifest, but most of the extra CPU is unattributed, pending a control.}
 
 \subsection{Hybrid Key Establishment (RQ2)}\label{sec:hybrid}
 \textbf{Cost per object.} X-Wing takes \RevKeXwingPut\,ms on PUT and \RevKeXwingGet\,ms on GET on
@@ -1254,8 +1263,8 @@ instance, it tests the robustness of the ratios and not ARM against x86 in absol
 \textbf{Internal.} Stage timers above one worker include interpreter-lock waiting, so
 key-establishment time is reported at one worker only. Modes differ in manifest size as well as
 in key establishment, and we have no control that separates the two
-(Section~\ref{sec:mechanism}). Six of the eight primary cells could not have shown an effect of
-the mode on throughput. The exploratory campaign's pause failure
+(Section~\ref{sec:mechanism}). Seven of the eight primary cells could not have shown an effect
+of the mode on throughput. The exploratory campaign's pause failure
 (Section~\ref{sec:method}) added noise to small PUT cells; its results for those cells come from
 batch D. The 1\,MiB one-worker slowdown of the hybrids is unexplained. The profiling attribution
 names a subsystem, not a function. The two inconclusive primary cells were under-powered.
@@ -1263,10 +1272,10 @@ names a subsystem, not a function. The two inconclusive primary cells were under
 \textbf{External.} These are the limits of what the data supports. The client is Python with
 liboqs through a binding, and it is part of the measuring instrument: the only regime in which
 the modes differ is a saturated client, and that client spends about \RevHotCpuPerRequest\,ms of
-CPU per 64\,KiB GET, most of it interpreter and SDK work. A native client would spend far less,
-so the same absolute cost of key establishment and manifest handling would be a larger share,
-and the saturation model predicts a \emph{larger} relative deficit there. We have not measured
-it. The baseline set is also narrow: no ML-KEM-1024, no RSA-3072, and no remote key-service
+CPU per 64\,KiB GET, most of it interpreter and SDK work. A native client would spend far less
+per request, which would make any fixed cost a larger share; but the extra cost of ML-KEM in our
+client may itself be interpreter-level work on the manifest that a native client would also
+shrink. The direction of the change is therefore unknown, and we have not measured it. The baseline set is also narrow: no ML-KEM-1024, no RSA-3072, and no remote key-service
 wrap, which is a common deployment path. MinIO ran as a single node without erasure coding or replication;
 a distributed deployment has a different write path and may have a different ceiling and knee.
 Both hosts sat in one placement group with a sub-millisecond round trip; a wide-area client would
@@ -1275,8 +1284,8 @@ liboqs is intended for prototyping, not production.
 
 \textbf{Construct.} Throughput equivalence within $\pm$5\,\% is an engineering criterion, not a
 statement that two modes are identical; a ratio of \RevHotRatio{} with a narrow interval is
-formally equivalent and still a real difference. The saturation model is evaluated on the runs
-it describes, not on held-out configurations. The exploratory verdict counts are not corrected for
+formally equivalent and still a real difference. The CPU decomposition is computed on the runs
+it describes and has no predictive status. The exploratory verdict counts are not corrected for
 multiplicity. Runs last 20\,s; slower effects such as compaction or long-term memory growth are
 not observed.
 
@@ -1285,8 +1294,8 @@ The following have not been run, and the paper's claims are limited accordingly.
 (1)~\emph{Padded-manifest control:} X25519 with its manifest padded to ML-KEM's size, on the
 client-bound cells, to separate ciphertext handling from KEM computation.
 (2)~\emph{Native client:} the client-bound cells with a compiled client, as a new pre-registered
-family with client CPU per request as a co-primary endpoint, to test the saturation model where
-the denominator is small.
+family with client CPU per request as a co-primary endpoint, to learn whether the deficit grows
+or shrinks when the interpreter is removed.
 (3)~\emph{More repetitions of 64\,KiB PUT:} about \RevPowerNoisyNeeded{} per cell, or removal of
 those cells from the confirmatory family.
 (4)~\emph{An HPKE-conformant envelope}, to confirm that the per-object costs transfer.
@@ -1297,18 +1306,19 @@ store-side results.
 \section{Discussion}\label{sec:discussion}
 \textbf{Migration planning.} In the evaluated configuration, per-object ML-KEM-768 changes
 capacity only where the client CPU is already the bottleneck, and there by
-\RevHotDeficit--\ArmHotDeficit\,\%. The saturation model turns that into a procedure an operator
-can apply without a load test: measure client CPU per request for the current and the candidate
-mode on the real workload; if clients are not CPU-bound, expect no throughput change; if they
-are, expect throughput to fall by the ratio of the two. For a client stack other than ours the
-ratio must be re-measured, and for a native client we expect it to be less favourable.
+\RevHotDeficit--\ArmHotDeficit\,\%. The CPU decomposition suggests a procedure for an operator:
+measure client CPU per request for the current and the candidate mode on the real workload; if
+clients are not CPU-bound, expect no throughput change; if they are, expect throughput to fall
+by about the ratio of the two. The ratio must be re-measured for any client stack other than
+ours.
 
-\textbf{Why the cost is metadata.} The KEM computation is not what makes ML-KEM slower than
-X25519 on a saturated client: its decapsulation is cheaper. What ML-KEM adds to every request is
-a ciphertext of 1{,}088 bytes that must be stored, transferred, decoded and hashed. Reducing
-that work, with a binary manifest or by avoiding a second object, is therefore a more promising
-optimization than a faster KEM implementation, subject to the control experiment of
-Section~\ref{sec:pending}.
+\textbf{Where the client-bound cost may come from.} ML-KEM's decapsulation is cheaper than
+X25519's exchange, so the KEM operation itself does not explain why ML-KEM is slower on a
+saturated client. What ML-KEM also adds to every request is a ciphertext of 1{,}088 bytes that
+must be stored, transferred, decoded and hashed, and manifest handling is the largest stage
+difference we measure. If the control experiment of Section~\ref{sec:pending} confirms that
+this is the cause, a compact manifest would be a more useful optimization than a faster KEM;
+until then this is a hypothesis.
 
 \textbf{Where the cost lies.} The measurable costs are \RevMetaExtraMLKEM{} bytes of metadata per
 object and, for hybrids, a client-CPU increment that shows only under client saturation.
@@ -1326,12 +1336,13 @@ We evaluated per-object post-quantum key establishment on one client stack (Pyth
 \PythonVersion, liboqs \LiboqsVersion), a single-node MinIO server and AWS instances in two
 regions, with x86 and ARM clients. Under these conditions ML-KEM-768 takes
 \RevKeMLKEMPut--\ArmKeMLKEMGet\,ms per object across the two clients and is equivalent to X25519
-within $\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, most of
-which are limited by the network or the server. With a saturated client it is
+within $\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, in all but
+one of which the client is not saturated. In that one cell it is
 \RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and both losses follow from client CPU per
-request. The evidence attributes ML-KEM's extra CPU to its \RevMetaExtraMLKEM-byte larger
-manifest and not to the KEM itself, pending a control experiment. Bounded sessions are justified
+\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and both losses are differences in client
+CPU per request. Decapsulation is not the source of ML-KEM's extra CPU; handling its
+\RevMetaExtraMLKEM-byte larger manifest is the largest part we can measure, and the rest is
+unattributed pending a control experiment. Bounded sessions are justified
 only where that CPU is a measured bottleneck.
 
 These results should not be extended to native clients, distributed object stores, other S3

@@ -15,12 +15,12 @@ Each major criticism was tested against the data or a primary source before acti
 
 | Audit claim | Check | Outcome |
 |---|---|---|
-| Six of eight primary cells cannot show an effect of the mode | Bottleneck of each cell, from client and server CPU and network use | **Confirmed.** Only the two 64 KiB GET cells are client-bound |
+| Six of eight primary cells cannot show an effect of the mode | Bottleneck of each cell, from client and server CPU and network use | **Confirmed, and it is seven.** Only 64 KiB GET at 500 workers saturates the client; at 128 workers the client still has spare CPU |
 | The 4 % deficit is "probably not the KEM" | Stage timers at one worker (batches F, I1) | **Supported, not proven.** Decapsulation is 2–5 µs faster than X25519; manifest handling is 6 µs slower on GET and 16 µs on PUT |
 | C1's isolation claim does not hold | Manifest sizes per mode | **Confirmed.** 622 to 2,085 bytes. Claim rewritten |
-| Penalty ≈ extra CPU per request ÷ total | Predicted against observed ratio, 64 KiB GET | **Confirmed at saturation** (error ≤ 0.9 points at 500 workers, both architectures); over-predicts by 1.8–3.0 points at 128 workers, where the client is not saturated |
+| Penalty ≈ extra CPU per request ÷ total | Inverse CPU ratio against observed ratio, 64 KiB GET, same runs | **Holds at saturation** (within 0.9 points at 500 workers, both architectures), but it is an accounting identity there, not a prediction; it overstates the loss by 1.8–3.0 points at 128 workers, where the client is not saturated. Presented as a decomposition, not as a model with predictive status |
 | Knee range in the abstract contradicts Table XVI | Recomputed both quantities | **Confirmed.** 0.75–0.82 was the stability boundary; the knee at 64 KiB is 0.68–0.75 |
-| P2 manifest 2,091 vs 2,085 bytes | Source records | **Explained, not an error.** Recorded for a 1 MiB object in one table and a 1 KiB object in the other; the manifest embeds the plaintext size |
+| P2 manifest 2,091 vs 2,085 bytes | Source records | **Not an error.** Recorded for a 1 MiB object in one table and a 1 KiB object in the other; the manifest embeds object-dependent fields. The exact composition of the 6 bytes was not traced |
 | "No failed request" contradicts open-loop failure rule | Failure counts of the 185 open-loop runs | **Claim stands.** 0 failures; every queued request was served in the drain window. Now stated explicitly |
 | Identical MAPEs may be a rounding artifact | One more decimal | **Not identical:** 7.5 vs 7.6 % and 4.4 vs 4.5 % |
 | S3 user-metadata limit is about 2 KB | AWS S3 User Guide | **Confirmed:** 2 KB. Our JSON manifests are at or above it |
@@ -52,9 +52,9 @@ work only the authors or new experiments can supply.
 |---|---|---|---|---|
 | M1 | Public-key KEM per object not motivated | Added the deployments that need it (write-only producers, multiple recipients or escrow, cross-organization hand-off) and stated that a shared symmetric key needs no KEM (baseline B1) | Done | Sec. I |
 | M2 | HPKE not discussed | Added HPKE background, a subsection mapping the envelope to HPKE base mode with its three differences, a row in the claim taxonomy, and a statement that HPKE was not benchmarked | Partial | Sec. II-C, IV-E, Table III |
-| M3 | Primary family dominated by cells where the KEM cannot matter | Stated as a limitation in Methods, Results, Findings, abstract and conclusion. Added client CPU per request as an exploratory second endpoint for all 8 cells | Partial | Sec. VI-F, VII-D, Table XI |
-| M4 | Python client defines the only informative regime | Stated that the client is part of the instrument and that the model predicts a larger relative deficit on a native client. Not measured | Pending | Sec. I, IX-E, IX-F |
-| M5 | Deficit unexplained; isolation claim false | Isolation claim rewritten. New subsection with a saturation model and a one-worker stage comparison. Padded-manifest control not run | Partial | Sec. IV-B, VII-E, Tables XIII, XIV |
+| M3 | Primary family dominated by cells where the KEM cannot matter | Stated as a limitation in Methods, Results, Findings, abstract and conclusion (seven of eight cells). Added client CPU per request as an exploratory second endpoint for all 8 cells | Partial | Sec. VI-F, VII-D, Table XI |
+| M4 | Python client defines the only informative regime | Stated that the client is part of the instrument and that the direction of the change on a native client is unknown. Not measured | Pending | Sec. I, IX-E, IX-F |
+| M5 | Deficit unexplained; isolation claim false | Isolation claim rewritten. New subsection with a CPU decomposition and a one-worker stage comparison. It rules out decapsulation and names manifest handling as the largest measured stage difference; most of the extra CPU stays unattributed. Padded-manifest control not run | Partial | Sec. IV-B, VII-E, Tables XIII, XIV |
 | M6 | Queueing not novel, thin validation | Removed as contribution C4, retitled, cited Schroeder et al., knee and stability boundary reported separately, limits on the held-out points stated | Done | Sec. I, VII-I |
 | M7 | No URL, DOI or external timestamp | The paper now says the repository is not yet public and that identifiers are required before submission | Pending | Artifact section |
 
@@ -96,7 +96,7 @@ scripts.
 | # | Experiment | Why | Design | Est. effort and cost |
 |---|---|---|---|---|
 | 1 | **Padded-manifest control** | Separates ciphertext size from KEM computation; decides whether the paper can say "the KEM is free, its metadata is not" | New mode: X25519 with the manifest padded to 2,034 B. 64 KiB GET at 128 and 500 workers, with B2 and P1, 10 repetitions | 1 day of code, about 2 h and $6 of AWS |
-| 2 | **Native client** | The only informative regime is a saturated client, and ours is interpreted | Go, Rust or C client for the client-bound cells; new pre-registered family; client CPU per request co-primary; tests the saturation model | 2–3 weeks of development |
+| 2 | **Native client** | The only informative regime is a saturated client, and ours is interpreted; whether the deficit grows or shrinks without the interpreter is unknown | Go, Rust or C client for the client-bound cells; new pre-registered family; client CPU per request co-primary | 2–3 weeks of development |
 | 3 | **64 KiB PUT with about 50 repetitions** | Those two cells had 3 % and 73 % power | Same cells, about 50 repetitions | About 3 h and $8 of AWS |
 | 4 | **HPKE-conformant envelope** | Confirms that per-object costs transfer to the standard construction | Replace key schedule and nonce derivation; re-run one-worker cells | 1 week |
 | 5 | **Wider baselines** | ML-KEM-1024, RSA-3072, remote key-service wrap | Add modes; one-worker cells and the client-bound cells | 1 week |
@@ -157,12 +157,12 @@ The Tail at Scale, COSBench, pqm4, eBACS/SUPERCOP. See "Recommendations not foll
 2. **The cause of ML-KEM's client-bound cost is indicated, not established.** Stage differences
    at one worker are about 10 µs; the CPU difference at 500 workers is 79 µs (x86) and 109 µs
    (ARM). The padded-manifest control is not run.
-3. **The saturation model is tested on the runs it describes.** It has not predicted an unseen
-   configuration.
+3. **The CPU decomposition is an identity on the runs it describes.** It has no predictive
+   status until tested on a configuration it was not computed from.
 4. **A 5 µs key-derivation difference between modes is unexplained**, as is the 1 MiB one-worker
    slowdown of the hybrids.
 5. **Two primary cells are inconclusive and one ARM verdict depends on a stalled run.**
-6. **Six of eight primary cells could not have failed.** This is disclosed, not repaired.
+6. **Seven of eight primary cells could not have failed.** This is disclosed, not repaired.
 7. **The envelope is not HPKE**, and HPKE was not benchmarked.
 8. **Queueing results rest on 3 and 2 held-out points and one mode.**
 9. **The literature search did not cover IEEE Xplore or the ACM Digital Library.**
@@ -200,20 +200,20 @@ The Tail at Scale, COSBench, pqm4, eBACS/SUPERCOP. See "Recommendations not foll
 | 1 | Abstract carried about 20 numbers, used an undefined symbol and gave the stability boundary as the knee | Rewritten around four points: per-object time, the equivalence result with its caveat, the saturated-client deficit and its cause, scope | Sec. 8 items 1 and wording; Sec. 10 |
 | 2 | Introduction did not say why a public-key KEM is needed | New paragraph on deployments that need it | M1 |
 | 3 | The unknown was stated as if the result were not predictable | The introduction now concedes the back-of-envelope estimate and states what it cannot tell | Sec. 4 |
-| 4 | Four contributions, the fourth not about post-quantum cryptography | Three contributions; C2 gains the saturation model; queueing named as a supporting observation | M6 |
+| 4 | Four contributions, the fourth not about post-quantum cryptography | Three contributions; C2 gains the CPU decomposition; queueing named as a supporting observation | M6 |
 | 5 | "Differences isolate key establishment" | Replaced by "key establishment together with the handling of its ciphertext" | M5, 6.3 |
 | 6 | No HPKE | Background subsection, design subsection, claim-taxonomy row, related-work paragraph | M2 |
 | 7 | Margin justified by between-session drift | Provisioning argument tied to the measured stability boundary, labelled post hoc | 7.4 |
 | 8 | Primary family presented without its limitation | Limitation stated where the family is defined and where it is reported | M3 |
 | 9 | No sensitivity to the normality assumption | Bootstrap check | 7.5 |
-| 10 | Deficit reported without mechanism | New subsection "Why the Saturated Client Is Slower": model, two tables, and an explicit statement of what is not established | M5, 7.2, Sec. 4 |
+| 10 | Deficit reported without mechanism | New subsection "Why the Saturated Client Is Slower": CPU decomposition, stage comparison, two tables, and an explicit statement of what is and is not established | M5, 7.2, Sec. 4 |
 | 11 | Throughput the only endpoint in the primary family | Table of client CPU per request for all 8 cells | 7.1 |
 | 12 | Correlation offered as attribution | Demoted and caveated | 7.8 |
 | 13 | Unadjusted marks in the hybrid matrix | Caption gives the false-discovery count | 7.6 |
 | 14 | Single-object alternative asserted without checking the limit | S3's 2 KB limit cited, with its consequence | 6.6 |
 | 15 | Queueing presented as a contribution, with one range for two quantities | Retitled, scoped, two named thresholds, prior work cited, MAPE to one decimal | M6, 7.7, Sec. 8 item 1 |
 | 16 | Limitations did not name the experiments needed | New subsection "Experiments Still Required" | Instruction 6; roadmap |
-| 17 | Discussion said only that the deficit exists | New paragraphs: an operator procedure from the model, and why the cost is metadata | Sec. 10 |
+| 17 | Discussion said only that the deficit exists | New paragraphs: an operator procedure, and a hypothesis about where the cost comes from, labelled as a hypothesis | Sec. 10 |
 | 18 | Conclusion ended on a list of future work | Conclusion states the scope and names the decisive open experiment | Sec. 8 |
 | 19 | Artifact section implied availability | States that the repository is not public and has no identifier | M7 |
 | 20 | Two analysis lists claimed more pre-specification than there was | The list of analyses that were not pre-specified now includes the new ones | Integrity |
