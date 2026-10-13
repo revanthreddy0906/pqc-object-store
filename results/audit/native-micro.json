@@ -1,0 +1,2 @@
+{"arch":"amd64","go":"go1.26.2","mlkem768_decaps_ns":50637.87935,"x25519_ns":33413.9766,"xwing_decaps_ns":85059.99425}
+{"arch":"amd64","go":"go1.26.2","mlkem768_decaps_ns":50677.15555,"x25519_ns":33411.1844,"xwing_decaps_ns":85058.2078}
