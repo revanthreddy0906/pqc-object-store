@@ -207,12 +207,13 @@ Sikeridis et al.~\cite{sikeridis2020} & P & Post-quantum authentication in TLS 1
 Sosnowski et al.~\cite{sosnowski2023} & P & TLS 1.3 handshakes, black- and white-box & \checkmark & \checkmark & -- & -- & -- & -- \\
 Giron et al.~\cite{giron2023} & P & Hybrid KEMTLS, simulated and real networks & \checkmark & \checkmark & -- & -- & -- & -- \\
 Barbosa et al.~\cite{barbosa2024} & P & X-Wing construction and security proof & \checkmark & \checkmark & -- & -- & -- & -- \\
-Rodriguez et al.~\cite{rodriguez2025} & A & ML-KEM against RSA and ECC, primitives & \checkmark & -- & -- & -- & -- & -- \\
+Rodriguez-Alvarez~\cite{rodriguez2025} & A & ML-KEM against RSA and ECC, primitives & \checkmark & -- & -- & -- & -- & -- \\
 Demir et al.~\cite{demir2025} & A & Kyber and Dilithium primitives & \checkmark & -- & -- & -- & -- & -- \\
 Lopez et al.~\cite{lopez2025} & A & PQC on resource-constrained devices & \checkmark & -- & -- & -- & -- & -- \\
 Gadban and Kunkel~\cite{gadban2021} & P & S3 interface for HPC workloads & -- & -- & \checkmark & -- & \checkmark & -- \\
 Henziger and Carlsson~\cite{henziger2019} & P & Client-side encryption and delta encoding & -- & -- & -- & -- & -- & -- \\
 Prikutse et al.~\cite{prikutse2026} & A & Hybrid PQ model for multi-file cloud storage & \checkmark & \checkmark & -- & -- & -- & -- \\
+Junaid~\cite{junaid2026} & A & Hybrid PQ client-side encryption, self-hosted keys & \checkmark & \checkmark & -- & -- & -- & -- \\
 \textbf{This work} & & Client-side envelope encryption on S3 (MinIO) & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
 \bottomrule
 \end{tabular}
@@ -243,17 +244,22 @@ placing encryption at the storage client. None involves post-quantum key establi
 X25519+ML-KEM-768 and ML-DSA-65 for multi-file cloud storage and amortize signatures over a batch
 by commitment. According to its abstract, its evaluation concerns the signing phase, not
 concurrent S3 PUT/GET, queueing or a comparison with classical per-object key establishment.
+Junaid~\cite{junaid2026} proposes a client-side hybrid post-quantum encryption architecture with
+self-hosted key management; its abstract reports per-operation latency on a microcontroller and a
+server, not an object-store workload under concurrent clients.
 
 \textbf{Bounded key reuse.} Amazon S3 Bucket Keys derive per-object data keys from a time-limited
 bucket-level key and reduce key-service requests by up to 99\,\%~\cite{s3bucketkeys}; the AWS
 Encryption SDK caches data keys under age, message and byte limits~\cite{esdkcache}. Our session
 mode applies this established principle to ML-KEM roots and quantifies the trade-off.
 
-\textbf{Search.} In October 2026 we searched arXiv and the open web for combinations of
-\emph{ML-KEM} or \emph{Kyber} with \emph{object storage}, \emph{S3}, \emph{MinIO},
-\emph{client-side encryption}, \emph{envelope encryption} and \emph{concurrency}, and followed
-the references of the works above. We found vendor documentation and tutorials but, to our
-knowledge, no measurement of per-object ML-KEM under concurrent S3 load.
+\textbf{Search.} In October 2026 we ran keyword searches, restricted to arXiv, dblp and Semantic
+Scholar and on the open web, combining \emph{ML-KEM}, \emph{Kyber} or \emph{X-Wing} with
+\emph{object storage}, \emph{S3}, \emph{MinIO}, \emph{client-side encryption}, \emph{envelope
+encryption} and \emph{concurrency}; the queries and their outcome are logged in the artifact.
+This is a keyword search, not a systematic review. It returned primitive benchmarks, transport
+studies, vendor tutorials and the two storage designs above, but, to our knowledge, no measurement
+of per-object ML-KEM under concurrent S3 load.
 
 \section{System and Threat Model}\label{sec:design}
 \subsection{Threat Model}
@@ -663,7 +669,14 @@ guard stopped both instances. Its data was never downloaded or analysed; the bat
 from its first run with the same configuration and seed. (2) The profiling batch was run twice,
 once under system-call tracing and once under CPU sampling, because the first CPU profiles were
 unusable. (3) The stall rule is applied to closed-loop runs only, since open-loop throughput is
-fixed by the offered rate. No analysis choice was changed after seeing results.
+fixed by the offered rate.
+
+\textbf{Not pre-specified.} The pre-registration fixed the primary family, its test and the
+training and held-out split. It did not fix the following, which were chosen during analysis and
+are exploratory: applying Holm's correction to the ARM family as well; the definition of the knee
+as twice the light-load response time; the functional form of the load-dependent model; the
+order-and-time regression of Section~\ref{sec:validity}; and the layout of the session and hybrid
+tables.
 
 \section{Results}\label{sec:results}
 \subsection{Per-Object Key-Establishment Time (RQ1)}
@@ -738,13 +751,15 @@ observations locate it. \emph{The device is not the limit:} over \RevProfDiskSec
 seconds the data disk's median write latency was \RevProfDiskAwait\,ms (95th percentile
 \RevProfDiskAwaitPninetyfive\,ms) with a mean queue depth of \RevProfDiskQueue, while it wrote
 \RevProfDiskWriteMib\,MiB/s against an \RevDiskWrite\,MiB/s baseline; requests at that load take
-tens of milliseconds. \emph{System-call time goes to locks and the namespace:} of the time traced
+tens of milliseconds. The device's reported utilization was \RevProfDiskUtil\,\%, but for an
+NVMe device that figure is the share of time with at least one request in flight, not a measure
+of saturation; latency and queue depth are the informative quantities. \emph{System-call time goes to locks and the namespace:} of the time traced
 inside MinIO's system calls, \RevProfFutexTime\,\% is lock waiting (futex) and
 \RevProfNamespaceTime\,\% is directory and metadata operations, which are
-\RevProfNamespaceCalls\,\% of all calls, about \RevProfDirectoryPerObject{} directory operations
-per stored S3 object; writing the data is \RevProfWriteTime\,\%. MinIO calls \texttt{fdatasync}
-\RevProfSyncPerObject{} times per stored object, and those calls take \RevProfSyncTime\,\% of
-the traced time. \emph{The CPU profile agrees:} \RevProfCpuUser\,\% of MinIO's CPU samples are in
+\RevProfNamespaceCalls\,\% of all calls; writing the data is \RevProfWriteTime\,\%. MinIO does
+call \texttt{fdatasync}, but those calls are \RevProfSyncCalls\,\% of all calls and
+\RevProfSyncTime\,\% of the traced time. The tracing windows also contain the deletion of
+objects after each run, so we report shares and not counts per upload. \emph{The CPU profile agrees:} \RevProfCpuUser\,\% of MinIO's CPU samples are in
 its own code and \RevProfCpuKernel\,\% in the kernel, where lock-spinning routines alone account
 for \RevProfCpuKernelLocks\,\% of all samples. Across the \RevNoisyRuns{} runs of the 64\,KiB PUT
 cell at 128 workers, throughput follows the server's CPU use (correlation \RevNoisyCpuCorr),
@@ -793,7 +808,10 @@ optimistic for this cell.
 
 \emph{Sensitivity.} At $\pm$10\,\% all 8 x86 cells and \ArmPrimaryEqTenPct{} ARM cells are
 equivalent; at $\pm$2\,\%, \RevPrimaryEqTwoPct{} and \ArmPrimaryEqTwoPct. Excluding stalled runs
-(\RevPrimaryStalledPairs{} pair on x86, \ArmPrimaryStalledPairs{} on ARM) changes no verdict.
+(\RevPrimaryStalledPairs{} pair on x86, \ArmPrimaryStalledPairs{} on ARM) and re-applying the
+correction changes \RevPrimaryNoStallFlips{} verdicts on x86 and \ArmPrimaryNoStallFlips{} on ARM:
+the ARM knee cell, with one pair fewer, becomes inconclusive
+($p_{\text{Holm}}=\ArmKneeNoStallPHolm$). That cell's equivalence on ARM is therefore fragile.
 
 \begin{table*}[t]
 \caption{Primary family: paired throughput ratio ML-KEM-768/X25519, TOST with bounds [0.95, 1.05], $\alpha=0.05$, Holm-adjusted over the 8 cells of each client. Eq.\ = equivalent, Inc.\ = inconclusive. The $\pm$2\,\% column reports whether the cell is also equivalent at that stricter margin (unadjusted).}
@@ -1025,7 +1043,9 @@ with $B_{\max}\ge 10$ does the throughput interval exclude 1
 (\RevSessThroughputLo--\RevSessThroughputHi), because this workload is limited by the server. On a
 client-bound workload, 64\,KiB GET at 32 workers, a receiver that caches roots gains
 \RevSessGetGain\,\% throughput (95\,\% CI \RevSessGetGainLo--\RevSessGetGainHi\,\%) at
-$B_{\max}=100$. The exploratory campaign agrees: N1 saved
+$B_{\max}=100$. This is an upper bound: the run reads 32 objects repeatedly, so every root stays
+in the receiver's cache and almost no decapsulation remains; a workload with a large working set
+would gain less. The exploratory campaign agrees: N1 saved
 \NoneSaveOneMin--\NoneSaveOneMax\,\textmu s of CPU per request at one worker and raised
 throughput only for small GETs at 32--128 workers (\NoneGetGainMin--\NoneGetGainMax\,\%). Its
 queue-aware variant lowered the bound under light load as designed, re-keying
@@ -1056,8 +1076,9 @@ intervals without shifting ratios.
 
 \subsection{Stalls}
 The pre-registered rule flags \RevStalls{} of \RevRuns{} x86 runs and \ArmStalls{} of \ArmRuns{}
-ARM runs, all of them PUTs of at most 64\,KiB. Excluding them changes none of the 16 primary
-verdicts.
+ARM runs, all of them PUTs of at most 64\,KiB. Excluding them leaves the 8 x86 verdicts
+unchanged and turns one ARM verdict, the knee cell, from equivalent to inconclusive
+(Section~\ref{sec:primary}).
 
 \subsection{Order and Time Effects}
 Modes are shuffled within each repetition. As a check, for each primary cell we regress log

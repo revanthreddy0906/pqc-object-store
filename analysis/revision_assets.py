@@ -114,8 +114,13 @@ def tost_tables(tx: dict, ta: dict, out: Path, results: Path, m: Macros) -> dict
             m.add(f"{name}Primary{tag}", sum(r["verdict_holm"] == verdict for r in fam))
         m.add(f"{name}PrimaryEqTwoPct", sum(r["equivalent_at_2pct"] for r in fam))
         m.add(f"{name}PrimaryEqTenPct", sum(r["equivalent_at_10pct"] for r in fam))
-        m.add(f"{name}PrimaryNoStallSame",
-              sum(r["verdict"] == r["verdict_nostall"] for r in fam))
+        clean = stats.holm([r["p_tost_nostall"] for r in fam])
+        flipped = [(r, p) for r, p in zip(fam, clean)
+                   if (p < fa.ALPHA) != (r["verdict_holm"] == "equivalent")]
+        m.add(f"{name}PrimaryNoStallFlips", len(flipped))
+        for r, p in flipped:       # the only cell this can name is the knee
+            assert (r["operation"], r["size"], r["concurrency"]) == ("put", 65536, 32)
+            m.add(f"{name}KneeNoStallPHolm", pval(p))
         m.add(f"{name}PrimaryStalledPairs", sum(r["stalled_pairs"] for r in fam))
         by = {(r["operation"], r["size"], r["concurrency"]): r for r in fam}
         hot = by[("get", 65536, 500)]
@@ -567,11 +572,8 @@ def profiles(root: Path, out: Path, results: Path, m: Macros) -> None:
     m.add("RevProfNamespaceTime", num(100 * sum(seconds[c] for c in namespace) / total_s, 0))
     m.add("RevProfNamespaceCalls", num(100 * sum(calls[c] for c in namespace) / total_calls, 0))
     m.add("RevProfWriteTime", num(100 * seconds["write"] / total_s, 0))
-    stored = max(1, calls["lsetxattr"])     # MinIO writes one xattr per stored S3 object
-    directory = ("mkdirat", "openat", "renameat", "unlinkat", "faccessat")
     m.add("RevProfSyncTime", num(100 * sync_seconds / total_s, 1))
-    m.add("RevProfSyncPerObject", f"{sync / stored:.2f}")
-    m.add("RevProfDirectoryPerObject", num(sum(calls[c] for c in directory) / stored, 0))
+    m.add("RevProfSyncCalls", num(100 * sync / total_calls, 1))
     m.add("RevProfStraceCycles", len(list(strace_dir.glob("*-strace.txt"))))
 
     # Data disk under load (iostat extended statistics, one line per second).
@@ -600,7 +602,7 @@ def profiles(root: Path, out: Path, results: Path, m: Macros) -> None:
     user, kernel, locks = [], [], []
     lock_symbols = ("osq_lock", "rwsem_spin_on_owner", "mutex_spin_on_owner",
                     "native_queued_spin_lock_slowpath", "_raw_spin_lock", "rwsem_optimistic_spin",
-                    "queued_spin_lock_slowpath", "_raw_spin_unlock_irqrestore")
+                    "queued_spin_lock_slowpath")
     for path in sorted(perf_dir.glob("*-perf-dso.txt")):
         shares = {parts[1]: float(parts[0].rstrip("%")) for parts in
                   (line.split() for line in path.read_text().splitlines())
@@ -647,8 +649,17 @@ def robustness(runs_x: list[dict], runs_a: list[dict], tx: dict, ta: dict, famil
             cv = {mode: statistics.stdev(r["ops_per_s"] for r in mine if r["mode"] == mode)
                   / statistics.fmean(r["ops_per_s"] for r in mine if r["mode"] == mode)
                   for mode in ("P1", "B2")}
+            by_rep = {r["repetition"]: r["ops_per_s"] for r in mine if r["mode"] == "B2"}
+            ratios = sorted(r["ops_per_s"] / by_rep[r["repetition"]] for r in mine
+                            if r["mode"] == "P1" and r["repetition"] in by_rep)
+            q1, q3 = np.percentile(ratios, [25, 75])
             records.append({"platform": plat, "operation": row["operation"], "size": row["size"],
-                            "concurrency": row["concurrency"], "paired_ratio": row["ratio"],
+                            "concurrency": row["concurrency"], "n": len(ratios),
+                            "ratio_mean": statistics.fmean(ratios),
+                            "ratio_median": statistics.median(ratios),
+                            "ratio_sd": statistics.stdev(ratios), "ratio_q1": q1, "ratio_q3": q3,
+                            "ratio_min": ratios[0], "ratio_max": ratios[-1],
+                            "paired_ratio": row["ratio"],
                             "adjusted_ratio": math.exp(beta[0]),
                             "shift": abs(math.exp(beta[0]) / row["ratio"] - 1),
                             "cv_p1": cv["P1"], "cv_b2": cv["B2"]})
