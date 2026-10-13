@@ -42,27 +42,28 @@ Hyderabad, India\\
 
 \begin{abstract}
 Objects stored today under keys established with RSA or elliptic curves can be decrypted once a
-large quantum computer exists. Where objects are encrypted to a recipient's public key, migration
-means replacing RSA or
-elliptic-curve key establishment with ML-KEM (FIPS~203) on every object. That cost has been
+large quantum computer exists. Where objects are encrypted to a recipient's public key,
+migration places an ML-KEM (FIPS~203) key establishment on every object. That cost has been
 measured for isolated primitives and for TLS connections, but not on a concurrent object-store
-data path. We present a reproducible, instrumented evaluation of per-object post-quantum key
-establishment on an S3-compatible store: one Python client path (liboqs, chunked AES-256-GCM)
-against single-node MinIO on AWS, comparing ML-KEM-768 with X25519, RSA-OAEP-4096, a
-symmetric-only baseline and two X25519+ML-KEM-768 hybrids, in an exploratory campaign and a
-pre-registered confirmatory campaign on x86 and ARM clients (\RevAllRuns{} runs,
-\RevAllRequests{} million requests). ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms per
-object on x86. In paired equivalence tests ($\pm$5\,\%, Holm-corrected) its throughput is
-equivalent to X25519 in \RevPrimaryEq{} of 8 pre-specified cells on each architecture and
-non-equivalent in none; but in all except one of those cells the network, the server or spare
-client CPU absorbs any difference, so no key-establishment mode could have changed throughput.
-The informative case is the one cell with a saturated client: there ML-KEM is
-\RevHotDeficit--\ArmHotDeficit\,\% slower, which is accounted for by its higher client CPU per
-request. Decapsulation is not the source, as it is cheaper than X25519; the largest stage
-difference we can measure is the handling of a manifest \RevMetaExtraMLKEM{} bytes larger, but
-most of the extra CPU is unattributed and a control experiment is outstanding. All findings are
-limited to this client stack, a single-node store and one cloud provider; a native-client
-replication is the main open item.
+data path. We present a reproducible, instrumented evaluation on an S3-compatible store
+(single-node MinIO on AWS): a Python client (liboqs, chunked AES-256-GCM) comparing ML-KEM-768
+with X25519, RSA-OAEP-4096, a symmetric-only baseline and two X25519+ML-KEM-768 hybrids, in an
+exploratory and a pre-registered confirmatory campaign on x86 and ARM clients, followed by
+pre-registered controls and a native Go reader. In paired equivalence tests ($\pm$5\,\%,
+Holm-corrected) ML-KEM's throughput is equivalent to X25519 in \RevPrimaryEq{} of 8
+pre-specified cells on each architecture and non-equivalent in none, but only one of those
+cells has a saturated client, so the others mostly confirm where the bottleneck is. In that one
+cell the Python client is \RevHotDeficit--\ArmHotDeficit\,\% slower with ML-KEM. Two controls
+explain why: a manifest padded to ML-KEM's size accounts for \AudPadShare\,\% of the deficit,
+and calling the same ML-KEM through one foreign call, where the library binding makes four,
+removes it (\AudBindReleasedRatio{} of X25519's throughput). The deficit is thus an artifact of
+the binding. It is not, however, absent in general: a native reader restricted to one core is
+\AudNOneMlkemDeficit\,\% slower with ML-KEM and \AudNOneXwingDeficit\,\% with X-Wing, because its
+ML-KEM implementation costs more CPU than its X25519. The throughput cost of per-object
+post-quantum key establishment is therefore the ratio of client CPU per request, visible only
+when the client is saturated, and it depends on the implementation, not on the algorithm
+alone. ML-KEM's lasting cost is \RevMetaIntrinsic{} bytes of ciphertext per object. Findings are
+limited to these two clients, a single-node store and one cloud provider.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -110,8 +111,9 @@ it fails, by how much, and whether the cause is the KEM computation or the large
 drags through the data path (Section~\ref{sec:related}, Table~\ref{tab:gap}).
 
 \textbf{Thesis.} This paper presents a reproducible systems-level evaluation of post-quantum
-per-object key establishment in concurrent S3-compatible storage workloads, and locates its
-throughput cost in client CPU per request. Its contributions are, in
+per-object key establishment in concurrent S3-compatible storage workloads. It locates the
+throughput cost in client CPU per request under client saturation, and shows with controls and
+a second client that this cost belongs to the implementation and not to the algorithm. Its contributions are, in
 order of importance:
 \begin{itemize}
 \item[\textbf{C1}] \textbf{End-to-end benchmark.} An instrumented client-side envelope-encryption
@@ -119,11 +121,12 @@ path on which ML-KEM-768, X25519, RSA-OAEP-4096, symmetric-only, plaintext and t
 are interchangeable. The modes share every stage except key establishment and the manifest that
 carries its ciphertext, so differences between them reflect both (Sections~\ref{sec:design}
 and~\ref{sec:impl}).
-\item[\textbf{C2}] \textbf{Systems evidence and a cost model.} Measurements over object size,
+\item[\textbf{C2}] \textbf{Systems evidence and its explanation.} Measurements over object size,
 1--500 concurrent workers, two client architectures, throughput, latency, CPU, memory and
 metadata, with the independently restarted run as the experimental unit and pre-registered paired
-equivalence tests; and a decomposition that accounts for the one throughput difference we observe
-by client CPU per request, which turns a load-test question into a CPU measurement
+equivalence tests; a decomposition that accounts for every throughput difference we observe by
+client CPU per request; two pre-registered controls that identify the cause of the Python
+client's deficit; and a replication with a native reader
 (Sections~\ref{sec:method} and~\ref{sec:results}).
 \item[\textbf{C3}] \textbf{Security--performance mechanism.} Bounded session amortization of
 ML-KEM with object and time limits, reported as performance gained against objects and bytes
@@ -141,28 +144,26 @@ and with a hybrid construction, and what explains any difference? \textbf{RQ3:} 
 amortization buy, at what exposure, and does the choice of mode move the point at which response
 time degrades under open-loop load?
 
-\textbf{Findings.} In the evaluated configuration:
-(i) per-object ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms on the x86 client and
-\ArmKeMLKEMPut--\ArmKeMLKEMGet\,ms on the ARM client, less than X25519 on PUT;
+\textbf{Findings.} In the evaluated configurations:
+(i) per-object ML-KEM-768 takes \RevKeMLKEMPut--\RevKeMLKEMGet\,ms on the x86 Python client,
+less than X25519 on PUT, and \AudBindReleasedKeOne\,ms when the library is called directly;
 (ii) its throughput is equivalent to X25519 within $\pm$5\,\% in \RevPrimaryEq{} of 8
-pre-specified cells on each architecture, but this is largely a statement about the bottleneck:
-only one of those cells has a saturated client;
-(iii) with a saturated client ML-KEM is \RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and in both cases the loss matches the extra
-client CPU per request;
-(iv) ML-KEM's decapsulation is cheaper than X25519, so its extra CPU lies elsewhere; the largest
-stage difference we measure is manifest handling, and most of the extra CPU is unattributed;
-(v) RSA-4096 is the one mode that moves the bottleneck;
-(vi) the small-object write ceiling lies in the storage server's metadata path, not in its disk;
-and (vii) sessions save a few percent of client CPU and nothing else unless the client is
-saturated.
+pre-specified cells on each architecture, but only one of those cells has a saturated client;
+(iii) in that cell the Python client is \RevHotDeficit--\ArmHotDeficit\,\% slower with ML-KEM,
+and that deficit is produced by the library binding: with one foreign call per operation it
+disappears;
+(iv) a native Go reader, saturated on one core, is \AudNOneMlkemDeficit\,\% slower with ML-KEM and
+\AudNOneXwingDeficit\,\% with X-Wing, in line with the CPU its implementations need;
+(v) in every case the throughput ratio follows the ratio of client CPU per request;
+(vi) RSA-4096 is the one mode that moves the bottleneck in the Python client;
+(vii) the small-object write ceiling lies in the storage server's metadata path, not in its
+disk; and (viii) sessions save a few percent of client CPU and nothing else unless the client
+is saturated.
 
 \textbf{Scope.} We do not evaluate the security of ML-KEM, side channels, or transport security,
-which is held constant. All performance statements concern one Python client stack, one
-single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}). Because the
-only regime in which the modes differ is a saturated client, and our client is interpreted,
-the size and even the direction of the change on a native client is the most important thing
-this paper does not establish; Section~\ref{sec:pending} lists the experiments that remain.
+which is held constant. All performance statements concern one Python client stack and one small native reader, one
+single-node MinIO deployment and one cloud provider (Section~\ref{sec:validity}). The native reader covers the GET path of three modes only; Section~\ref{sec:pending} lists the
+experiments that remain.
 
 \section{Background}\label{sec:background}
 \subsection{Key-Encapsulation Mechanisms and ML-KEM}
@@ -576,6 +577,16 @@ detached session, fetches results and stops or deletes all resources. Before lau
 estimates the run time and cost of each experiment configuration. To bound cost, both instances
 stop themselves when idle, and the client stops itself shortly after an experiment completes.
 
+\subsection{Native Reader}
+For the replication of Section~\ref{sec:native} we wrote a second, deliberately small client in
+Go (\AudNGo): the GET path of modes B2, P1 and P3, with ML-KEM-768, X25519, HKDF, SHA-3 and
+AES-GCM from Go's standard library and the MinIO Go SDK. A test opens objects written by the
+Python client in all three modes and several sizes and rejects modified ciphertexts and a wrong
+expected mode, so the two clients agree on the object format. Because Go's ML-KEM takes keys
+as seeds, the recipient keys for this client are generated from seeds on the Python side. Its
+benchmark runs goroutines in one process and reports throughput, process CPU and latency; it
+has no stage timers.
+
 \subsection{Analysis Pipeline}
 A summarizer streams the compressed request records of each experiment once and writes one row
 per run. A statistics stage computes intervals, paired equivalence tests, bottleneck labels and
@@ -604,7 +615,7 @@ The repository is private at the time of writing, so a reader cannot yet check t
 Table~\ref{tab:batches} lists its batches.
 
 \begin{table}[t]
-\caption{Batches of the confirmatory campaign. Batches A--D are listed in Table~\ref{tab:sources}.}
+\caption{Batches of the confirmatory campaign (E--I) and of the follow-up controls (J--N), each pre-registered before its runs. Batches A--D are listed in Table~\ref{tab:sources}.}
 \label{tab:batches}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
@@ -619,6 +630,12 @@ H & x86 & \RevBatchHRuns & closed-loop $\mu(n)$ and open loop, P1 \\
 P & x86 & -- & profiling only; no performance numbers \\
 I, IK & ARM & \RevBatchIRuns, \RevBatchIKRuns & primary family repeated (B2, P1, P3) \\
 I1 & ARM & \RevBatchIOneRuns & one-worker cells \\
+\midrule
+J & x86 & \AudJRuns & control: X25519 with a padded manifest \\
+K & x86 & \AudKRuns & 64\,KiB PUT cells, 50 repetitions \\
+L & x86 & \AudLRuns & control: ML-KEM through one foreign call \\
+M, MT & x86 & \AudAllocRuns & diagnostic: allocator, 1\,MiB PUT \\
+N & x86 & \AudNRuns & native (Go) reader, GET only \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -629,6 +646,13 @@ I1 & ARM & \RevBatchIOneRuns & one-worker cells \\
 \centering\footnotesize
 \input{generated/tab-sources.tex}
 \end{table}
+
+\emph{Follow-up controls} (batches J--N, \AudRuns{} runs with the Python client and \AudNRuns{}
+with a native one) were added after the confirmatory campaign had shown a client-bound deficit
+whose cause we could not identify. Each was pre-registered with its own decision rule, pushed to
+the hosted repository before its first run, and is analysed separately; none is pooled with
+batches E--I. They ran on the x86 instance types of the confirmatory campaign with a new server
+instance.
 
 \subsection{Testbeds}
 In every testbed the client and MinIO run on two instances in one cluster placement group; MinIO
@@ -739,12 +763,16 @@ guard stopped both instances. Its data was never downloaded or analysed; the bat
 from its first run with the same configuration and seed. (2) The profiling batch was run twice,
 once under system-call tracing and once under CPU sampling, because the first CPU profiles were
 unusable. (3) The stall rule is applied to closed-loop runs only, since open-loop throughput is
-fixed by the offered rate.
+fixed by the offered rate. (4) The pre-registration of batch L was pushed five minutes after
+batch J had started; it concerns batch L and a prediction for batch J, none of whose data had
+been downloaded. (5) The disk baseline of the testbed of batches J--N did not complete; its
+network baseline did.
 
 \textbf{Not pre-specified.} The pre-registration fixed the primary family, its test and the
 training and held-out split. It did not fix the following, which were chosen during analysis and
 are exploratory: applying Holm's correction to the ARM family as well; client CPU per request as a
 second endpoint; the CPU decomposition and the stage comparison of Section~\ref{sec:mechanism};
+the single-thread timing of the native reader's key recovery;
 the bootstrap check; the definition of the knee as twice the light-load response time; the
 functional form of the load-dependent model; the order-and-time regression of
 Section~\ref{sec:validity}; and the layout of the session and hybrid tables.
@@ -957,8 +985,9 @@ This is an accounting identity once saturation holds, not a predictive model: ev
 runs it describes, its error measures only how equal the core counts are. We use it for two
 things. It shows that the deficit has no other source than client CPU, and it reduces the
 question ``will this mode cost throughput?'' to a CPU measurement plus a check for saturation.
-It would become a prediction only if tested on a configuration it was not computed from, which
-we have not done. Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use nearly the same number of cores (within 0.1 of
+It becomes a prediction only when tested on data it was not computed from; we do that once,
+below, and it also holds in the native reader of Section~\ref{sec:native}.
+Table~\ref{tab:model} applies it to 64\,KiB GET. At 500 workers, where all modes use nearly the same number of cores (within 0.1 of
 each other for the post-quantum modes, Table~\ref{tab:model}), it reproduces the observed ratio of ML-KEM and of both hybrids to within
 \RevModelErrHot{} percentage points on both architectures, and RSA-4096, which needs more than
 twice the CPU, to within \RevModelErrHotRsa. At 128 workers the client is not yet saturated: the
@@ -996,21 +1025,108 @@ unaffected.
 \input{generated/tab-stages.tex}
 \end{table}
 
-\textbf{What this does and does not establish.} It establishes that decapsulation is not the
-source of ML-KEM's client-bound cost, and that manifest handling is the largest stage difference
-we can measure. It does not establish that the manifest is the cause. The timed stage
-differences at one worker sum to about 10\,\textmu s, while the CPU difference at 500 workers
-is \RevHotCpuDelta\,\textmu s, so most of it is unattributed; at one worker the CPU difference
-itself cannot be resolved with five runs (Table~\ref{tab:stages}), and above one worker the
-stage timers cannot localize it. The remainder may be manifest work made more expensive by
-contention, work outside the timed stages such as receiving the larger manifest, or something
-else in the KEM binding that only appears under contention. A control that pads the X25519 manifest to
-ML-KEM's size would separate ciphertext size from KEM computation directly; we have not run it
-(Section~\ref{sec:pending}).
+The stage timers therefore rule out decapsulation and leave two candidates: the handling of a
+manifest \RevMetaExtraMLKEM{} bytes larger, and the way the client reaches ML-KEM. We tested
+each with a pre-registered control on 64\,KiB GET at 500 workers
+(Table~\ref{tab:control}; decision rules fixed before the runs).
 
-\finding{3}{The client-bound deficit is entirely a difference in client CPU per request.
-Decapsulation is not its source. The largest stage difference we can measure is the handling of
-ML-KEM's larger manifest, but most of the extra CPU is unattributed, pending a control.}
+\textbf{Control 1: manifest size (batch J).} Mode C2 is X25519 whose stored ciphertext is
+zero-padded to 1{,}088 bytes, so its manifest is byte-for-byte as long as ML-KEM's. Padding
+alone costs \AudPadCost\,\% of throughput (ratio \AudPadRatio, 90\,\% CI \AudPadCI). ML-KEM
+remains \AudRestCost\,\% slower than the padded control (\AudRestRatio, \AudRestCI). By the
+pre-registered rule, manifest size \emph{\AudPadVerdict} the deficit: it accounts for
+\AudPadShare\,\% of it (90\,\% CI \AudPadShareLo--\AudPadShareHi\,\%). At one worker the padded
+control shows the same slower manifest stage as ML-KEM (+\AudPadStageGet\,\textmu s against
++\AudMlkemStageGet\,\textmu s), so that stage difference is purely one of size, and it is
+small.
+
+\textbf{Control 2: the binding (batch L).} Our client reaches liboqs through liboqs-python,
+which creates a key-encapsulation object for every operation and makes four foreign calls per
+decapsulation (allocate, decapsulate, cleanse, free), each releasing the interpreter lock;
+X25519, through pyca/cryptography, is a single call. Modes H1 and G1 run the same liboqs
+ML-KEM-768 and write the same manifest as P1, but make one foreign call per operation on a
+handle created once per process; H1 releases the interpreter lock around it and G1 holds it.
+With one call, the deficit disappears: against X25519, H1 reaches \AudBindReleasedRatio{}
+(\AudBindReleasedCI) and G1 \AudBindHeldRatio{} (\AudBindHeldCI), both equivalent within
+$\pm$2\,\%, while P1 in the same batch is at \AudLFullRatio{} (\AudLFullCI). By the
+pre-registered rule the binding \emph{\AudBindVerdict} the deficit; it removes
+\AudBindReleasedRemoved\,\% of it (90\,\% CI
+\AudBindReleasedRemovedLo--\AudBindReleasedRemovedHi\,\%). Whether the single call releases the
+lock makes no measurable difference (G1/H1 \AudBindHeldOverReleased, \AudBindHeldOverReleasedCI),
+so the cost lies in the per-operation object handling and the number of foreign calls, not in
+the locking policy as such. The one-worker timers agree: a decapsulation takes
+\AudBindBindingKeOne\,ms through the binding and \AudBindReleasedKeOne\,ms as a single call,
+against \AudBindEcdhKeOne\,ms for X25519.
+
+\begin{table*}[t]
+\caption{Controls on 64\,KiB GET (batches J and L, ten repetitions, x86 Python client): paired ratios with 90\,\% intervals. ``Padded manifest'' = X25519 with a manifest as large as ML-KEM's; ``binding'' = ML-KEM-768 through liboqs-python (mode P1); ``one call'' = the same ML-KEM-768 through a single foreign call per operation.}
+\label{tab:control}
+\centering\footnotesize
+\input{generated/tab-control.tex}
+\end{table*}
+
+\textbf{What the controls establish.} The client-bound deficit of ML-KEM in our measurements is
+an artifact of how the Python binding invokes the library. It is not a cost of ML-KEM, whose
+decapsulation is cheaper than an X25519 exchange, and only \AudPadShare\,\% of it comes from
+the larger manifest. The two controls are independent and their effects need not add up exactly:
+the one-call modes carry the larger manifest and still match X25519, because their cheaper
+key establishment offsets it. The deficit itself replicated in three independent batches on two
+server instances (\RevHotRatio, \AudJFullRatio{} and \AudLFullRatio). A prediction fixed before
+batches J and L, \AudPredicted{} from the CPU ratio of batch E, missed the observed ratios by
+\AudPredictionErrorJ{} and \AudPredictionErrorL{} points and lay \AudPredictionInsideL{} their
+intervals: the CPU decomposition holds within a batch but is not exact across batches.
+
+\finding{3}{The \RevHotDeficit--\ArmHotDeficit\,\% client-bound deficit of ML-KEM is produced by the Python binding, which
+makes four foreign calls per decapsulation: with one call it vanishes
+(\AudBindReleasedRatio{} of X25519's throughput). The larger manifest accounts for
+\AudPadShare\,\% of it; decapsulation itself is cheaper than X25519.}
+
+\subsection{A Native Client (RQ2)}\label{sec:native}
+If the Python client's deficit is a binding artifact, does a compiled client show none? We
+wrote a reader in Go that implements the GET path of modes B2, P1 and P3 and opens objects
+written by the Python client; it does the same per-object work (two S3 reads, manifest parsing,
+ciphertext-hash check, key recovery, HKDF, AES-GCM per chunk, a hash of the plaintext), with
+ML-KEM-768 and X25519 from Go's standard library. A compiled client needs so little CPU that 16
+cores cannot be saturated by this store, so the pre-registered primary cell restricts it to one
+core with 128 workers, which saturates it by construction (batch N, \AudNRuns{} runs,
+Table~\ref{tab:native}).
+
+\begin{table*}[t]
+\caption{Native Go reader, 64\,KiB GET (batch N, ten repetitions): X25519 in absolute terms (throughput, process CPU in cores, CPU per request) and paired ratios to it with 90\,\% intervals. Only the one-core cell has a saturated client.}
+\label{tab:native}
+\centering\footnotesize
+\input{generated/tab-native.tex}
+\end{table*}
+
+\textbf{Result.} In the saturated cell ML-KEM reaches \AudNOneMlkemThr{} of X25519's throughput
+(90\,\% CI \AudNOneMlkemThrCI) and X-Wing \AudNOneXwingThr{} (\AudNOneXwingThrCI): by the
+pre-registered rule, a \emph{\AudNOneMlkemVerdict} for both. Their CPU per request is higher by
+the inverse factors (\AudNOneMlkemCpu{} and \AudNOneXwingCpu), so the decomposition of
+Section~\ref{sec:mechanism} holds here as well. The native reader spends
+\AudNOneCpuUs\,\textmu s of CPU per request with X25519, against \RevHotCpuPerRequest\,ms for
+the Python client, so a given absolute cost is a five times larger share of it.
+
+\textbf{Why the sign differs from the Python control.} With liboqs called directly, ML-KEM
+decapsulation was \emph{cheaper} than X25519 (\AudBindReleasedKeOne\,ms against
+\AudBindEcdhKeOne\,ms). In Go's standard library it is dearer: timed alone on the same machine,
+decapsulation takes \AudNMicroMlkem\,\textmu s, an X25519 exchange \AudNMicroEcdh\,\textmu s and
+an X-Wing decapsulation \AudNMicroXwing\,\textmu s (an exploratory single-thread timing, not part
+of the pre-registered batch). That accounts for \AudNMicroMlkemExtra{} of the
+\AudNOneMlkemCpuDelta\,\textmu s that ML-KEM adds per request and \AudNMicroXwingExtra{} of the
+\AudNOneXwingCpuDelta\,\textmu s that X-Wing adds; the rest is consistent with handling the
+larger manifest but was not measured separately in this client.
+
+\textbf{Unsaturated cells.} With 16 cores the reader is not CPU-saturated
+(\AudNMidCores{} and \AudNHotCores{} cores in use). At 500 workers the modes are within
+\AudNHotXwingDeficit\,\% of each other, as expected when the store sets the pace. At 128 workers
+ML-KEM is \AudNMidMlkemDeficit\,\% and X-Wing \AudNMidXwingDeficit\,\% slower, with wider
+intervals; we have no explanation for a difference of that size in a cell that is not
+CPU-saturated by our criterion, and note that the 16 virtual CPUs are 8 physical cores.
+
+\finding{4}{A native reader saturated on one core is \AudNOneMlkemDeficit\,\% slower with ML-KEM
+and \AudNOneXwingDeficit\,\% with X-Wing. The cost of post-quantum key establishment under
+client saturation is real but implementation-specific: it follows CPU per request, which was
+lower for ML-KEM than for X25519 with one library and higher with another.}
 
 \subsection{Hybrid Key Establishment (RQ2)}\label{sec:hybrid}
 \textbf{Cost per object.} X-Wing takes \RevKeXwingPut\,ms on PUT and \RevKeXwingGet\,ms on GET on
@@ -1046,11 +1162,25 @@ values are again small GETs at 128 workers. Its client CPU per request is up to
 \RevMatrixXwingCpuHi\,\% above X25519. Tail latency (p99) follows throughput and shows no
 separate hybrid penalty. Client peak memory differs from X25519 by a median of
 \RevHybridRssDiffMedian\,MiB (\RevHybridRssDiffMedianPct\,\%) and at most
-\RevHybridRssDiffMaxPct\,\% across modes and workloads. One anomaly remains unexplained: at
-1\,MiB PUT with one worker X-Wing is \RevMidPutXwingDeficit\,\% and P2
-\RevMidPutStudyHybridDeficit\,\% slower than X25519 although key establishment is only
-\RevKeShareXwingMidPut\,\% of the request; the exploratory campaign showed the same effect for
-P2, located in the AES-GCM stage timer, which all modes share.
+\RevHybridRssDiffMaxPct\,\% across modes and workloads. One anomaly in this table is not cryptographic. At 1\,MiB PUT with one worker X-Wing is
+\RevMidPutXwingDeficit\,\% and P2 \RevMidPutStudyHybridDeficit\,\% slower than X25519 although key
+establishment is \RevKeShareXwingMidPut\,\% of the request; the difference sits in the AES-GCM
+stage timer, which all modes share. A diagnostic pair of batches (M and MT, \AudAllocRuns{} runs,
+Table~\ref{tab:alloc}) points to the memory allocator. With default settings the AES-GCM stage
+takes between \AudAllocDefaultLo{} and \AudAllocDefaultHi\,ms depending on the mode, a factor of
+\AudAllocDefaultSpread. With glibc's dynamic mmap threshold disabled it takes
+\AudAllocFixedLo--\AudAllocFixedHi\,ms in every mode, a factor of \AudAllocFixedSpread, and the
+throughput spread between modes falls from \AudAllocDefaultThrSpread\,\% to
+\AudAllocFixedThrSpread\,\%. The stage time is thus governed by where the 1\,MiB chunk buffer is
+allocated, which depends on a mode's earlier allocations, and not by the cipher or the key
+establishment. A small residual for X-Wing remains.
+
+\begin{table}[t]
+\caption{1\,MiB PUT, one worker: AES-GCM stage time and throughput with the default allocator and with glibc's mmap threshold fixed at 256\,MiB (batches M and MT, five runs each)}
+\label{tab:alloc}
+\centering\footnotesize
+\input{generated/tab-alloc.tex}
+\end{table}
 
 \begin{table*}[t]
 \caption{Hybrid matrix (batch F; 64\,KiB at 128 workers from batch E): X25519 in absolute terms and paired ratios of ML-KEM-768 (P1), the concatenation hybrid (P2) and X-Wing (P3) to it. $^{*}$ = the 95\,\% interval of the ratio excludes 1 (unadjusted, five runs; ten in batch E). Of the \RevMatrixTests{} ratios, \RevMatrixRawSig{} are marked; \RevMatrixFdrSig{} remain at a false-discovery rate of 5\,\% (Benjamini--Hochberg), so individual marks should not be over-read.}
@@ -1114,7 +1244,7 @@ data; they overstate both the bytes and the request count of a metadata-based de
 \resizebox{\columnwidth}{!}{\input{generated/tab-meta.tex}}
 \end{table}
 
-\finding{4}{ML-KEM-768 adds \RevMetaIntrinsic{} bytes of ciphertext per object, and
+\finding{5}{ML-KEM-768 adds \RevMetaIntrinsic{} bytes of ciphertext per object, and
 \RevMetaExtraMLKEM{} in our JSON encoding: irrelevant for large objects, dominant for
 kilobyte-sized ones, and \RevMetaIntrinsicBillionTB--\RevMetaBillionTB\,TB per billion objects
 before redundancy.}
@@ -1178,7 +1308,7 @@ The same reasoning applies to the choice between ML-KEM and a hybrid: where the 
 bottleneck the hybrid costs only \RevMetaXwingOverMLKEM{} bytes per object, and where it is, the
 cost is the throughput difference reported in Section~\ref{sec:hybrid}.
 
-\finding{5}{Sessions trade compromise scope for a
+\finding{6}{Sessions trade compromise scope for a
 \RevSessCpuSavingLo--\RevSessCpuSavingHi\,\% saving in client CPU. That saving
 becomes throughput only on client-bound workloads; a bound of 10 objects captures most of it.}
 
@@ -1214,97 +1344,105 @@ campaign, completed batches were downloaded from the client while parts of batch
 were running; the transfer used client CPU and network and may have added noise to those runs.
 Mode order is randomized within repetitions, so it cannot favour a mode, and no transfer
 overlapped the primary-family batches. Modes differ in manifest size as well as
-in key establishment, and we have no control that separates the two
+in key establishment; batch J separates the two for the Python client only
 (Section~\ref{sec:mechanism}). Seven of the eight primary cells could not have shown an effect
 of the mode on throughput. The exploratory campaign's pause failure
 (Section~\ref{sec:method}) added noise to small PUT cells; its results for those cells come from
 batch D. The 1\,MiB one-worker slowdown of the hybrids is unexplained. The profiling attribution
 names a subsystem, not a function. The two inconclusive primary cells were under-powered.
 
-\textbf{External.} These are the limits of what the data supports. The client is Python with
-liboqs through a binding, and it is part of the measuring instrument: the only regime in which
-the modes differ is a saturated client, and that client spends about \RevHotCpuPerRequest\,ms of
-CPU per 64\,KiB GET, most of it interpreter and SDK work. A native client would spend far less
-per request, which would make any fixed cost a larger share; but the extra cost of ML-KEM in our
-client may itself be interpreter-level work on the manifest that a native client would also
-shrink. The direction of the change is therefore unknown, and we have not measured it. The baseline set is also narrow: no ML-KEM-1024, no RSA-3072, and no remote key-service
-wrap, which is a common deployment path. MinIO ran as a single node without erasure coding or replication;
-a distributed deployment has a different write path and may have a different ceiling and knee.
-Both hosts sat in one placement group with a sub-millisecond round trip; a wide-area client would
-be dominated by the network. All runs used AWS, in two regions, with one server instance type.
-liboqs is intended for prototyping, not production.
+\textbf{External.} These are the limits of what the data supports. Most of the study uses one
+Python client with liboqs through a binding, and batch L shows how much that instrument can
+shape a result: its one client-bound deficit was produced by the binding. The native reader
+removes the interpreter but covers only the GET path of three modes at one object size, uses
+different cryptographic implementations, and reaches saturation only when confined to one core,
+which is an artificial condition; a production client saturating many cores may behave
+differently. The baseline set is narrow: no ML-KEM-1024, no RSA-3072, and no remote
+key-service wrap, which is a common deployment path. MinIO ran as a single node without erasure
+coding or replication, in a community edition that is no longer developed; a distributed
+deployment has a different write path and may have a different ceiling and knee. Both hosts sat
+in one placement group with a sub-millisecond round trip; a wide-area client would be dominated
+by the network. All runs used AWS, in two regions, with one server instance type. liboqs is
+intended for prototyping, not production.
 
 \textbf{Construct.} Throughput equivalence within $\pm$5\,\% is an engineering criterion, not a
 statement that two modes are identical; a ratio of \RevHotRatio{} with a narrow interval is
-formally equivalent and still a real difference. The CPU decomposition is computed on the runs
-it describes and has no predictive status. The exploratory verdict counts are not corrected for
+formally equivalent and still a real difference. The CPU decomposition is an identity on the
+runs it describes; its one advance prediction missed by up to \AudPredictionErrorL{} points. The exploratory verdict counts are not corrected for
 multiplicity. Runs last 20\,s; slower effects such as compaction or long-term memory growth are
 not observed.
 
 \subsection{Experiments Still Required}\label{sec:pending}
 The following have not been run, and the paper's claims are limited accordingly.
-(1)~\emph{Padded-manifest control:} X25519 with its manifest padded to ML-KEM's size, on the
-client-bound cells, to separate ciphertext handling from KEM computation.
-(2)~\emph{Native client:} the client-bound cells with a compiled client, as a new pre-registered
-family with client CPU per request as a co-primary endpoint, to learn whether the deficit grows
-or shrinks when the interpreter is removed.
-(4)~\emph{An HPKE-conformant envelope}, to confirm that the per-object costs transfer.
-(5)~\emph{Wider baselines:} ML-KEM-1024, RSA-3072 and a remote key-service wrap.
-(6)~\emph{A distributed or second S3 implementation}, and runs of 10 to 30 minutes, for the
+(1)~\emph{A full native client:} PUT, the remaining modes and several object sizes, saturating
+many cores, with a second ML-KEM implementation so that library and language can be separated.
+(2)~\emph{A manifest control in the native reader}, to split its ML-KEM cost into key recovery
+and manifest handling by measurement and not by a separate timing.
+(3)~\emph{An HPKE-conformant envelope}, to confirm that the per-object costs transfer.
+(4)~\emph{Wider baselines:} ML-KEM-1024, RSA-3072 and a remote key-service wrap.
+(5)~\emph{A distributed or second S3 implementation}, and runs of 10 to 30 minutes, for the
 store-side results.
 
 \section{Discussion}\label{sec:discussion}
-\textbf{Migration planning.} In the evaluated configuration, per-object ML-KEM-768 changes
-capacity only where the client CPU is already the bottleneck, and there by
-\RevHotDeficit--\ArmHotDeficit\,\%. The CPU decomposition suggests a procedure for an operator:
-measure client CPU per request for the current and the candidate mode on the real workload; if
-clients are not CPU-bound, expect no throughput change; if they are, expect throughput to fall
-by about the ratio of the two. The ratio must be re-measured for any client stack other than
-ours.
+\textbf{What a practitioner learns beyond the estimate.} That tens of microseconds of KEM vanish
+against milliseconds of storage is true but incomplete. Three things could not have been read
+off that estimate. First, the regime in which the cost appears is narrow and identifiable: only
+a CPU-saturated client, and then in proportion to client CPU per request. Second, the first
+cause we suspected was wrong. The 1{,}088-byte ciphertext and its handling explain
+\AudPadShare\,\% of the Python client's deficit; the rest came from a binding that crosses into
+native code four times per decapsulation. Third, the sign of the effect depends on the library:
+ML-KEM was cheaper than X25519 with liboqs called directly and dearer in Go's standard library,
+and the native client, having less overhead per request, shows the larger relative cost.
 
-\textbf{Where the client-bound cost may come from.} ML-KEM's decapsulation is cheaper than
-X25519's exchange, so the KEM operation itself does not explain why ML-KEM is slower on a
-saturated client. What ML-KEM also adds to every request is a ciphertext of 1{,}088 bytes that
-must be stored, transferred, decoded and hashed, and manifest handling is the largest stage
-difference we measure. If the control experiment of Section~\ref{sec:pending} confirms that
-this is the cause, a compact manifest would be a more useful optimization than a faster KEM;
-until then this is a hypothesis.
+\textbf{Migration planning.} The procedure these results support is short. Measure client CPU
+per request for the current and the candidate mode on the real workload and client. If clients
+are not CPU-bound, expect no change in throughput. If they are, expect throughput to change by
+about the inverse ratio of the two CPU figures: \RevHotDeficit--\ArmHotDeficit\,\% in our Python
+client, \AudNOneMlkemDeficit\,\% in our native reader on one core, and nothing with a one-call
+binding. A measurement on one client stack does not transfer to another.
 
-\textbf{Where the cost lies.} The measurable costs are \RevMetaExtraMLKEM{} bytes of metadata per
-object and, for hybrids, a client-CPU increment that shows only under client saturation.
-RSA-4096 is the poor choice: its private-key operation makes small-object reads CPU-bound at
-\RevRsaGetLo--\RevRsaGetHi{} of ML-KEM's throughput.
+\textbf{For library authors.} A binding that allocates an object and makes several foreign calls
+per operation can cost more under thread contention than the cryptography it wraps. Holding a
+handle per process and making one call per operation removed the entire deficit in our client;
+whether that call released the interpreter lock made no measurable difference.
+
+\textbf{Where the cost lies.} The lasting cost of ML-KEM is its ciphertext: \RevMetaIntrinsic{}
+bytes per object, or \RevMetaExtraMLKEM{} in a JSON/base64 manifest, which a binary encoding
+avoids. For hybrids there is in addition a client-CPU increment under saturation. RSA-4096 is
+the poor choice: its private-key operation makes small-object reads CPU-bound at
+\RevRsaGetLo--\RevRsaGetHi{} of ML-KEM's throughput in the Python client.
 
 \textbf{Capacity planning.} For this store, response time degrades at
 \RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop throughput for every mode we
-tested, in line with the known gap between closed- and open-loop behaviour
-\cite{schroeder2006}. That margin is several times larger than the difference between any two
-post-quantum modes.
+tested (Appendix~\ref{sec:queue}), in line with the known gap between closed- and open-loop
+behaviour~\cite{schroeder2006}. That margin is larger than the difference between any two
+post-quantum modes in either client.
 
 \section{Conclusion}\label{sec:conclusion}
-We evaluated per-object post-quantum key establishment on one client stack (Python
-\PythonVersion, liboqs \LiboqsVersion), a single-node MinIO server and AWS instances in two
-regions, with x86 and ARM clients. Under these conditions ML-KEM-768 takes
-\RevKeMLKEMPut--\ArmKeMLKEMGet\,ms per object across the two clients and is equivalent to X25519
-within $\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, in all but
-one of which the client is not saturated. In that one cell it is
-\RevHotDeficit--\ArmHotDeficit\,\% slower and X-Wing
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% slower, and both losses are differences in client
-CPU per request. Decapsulation is not the source of ML-KEM's extra CPU; handling its
-\RevMetaExtraMLKEM-byte larger manifest is the largest part we can measure, and the rest is
-unattributed pending a control experiment. Bounded sessions are justified
-only where that CPU is a measured bottleneck.
+We evaluated per-object post-quantum key establishment on an S3-compatible store with a Python
+client (Python \PythonVersion, liboqs \LiboqsVersion) on x86 and ARM and with a native Go
+reader, against a single-node MinIO server on AWS. ML-KEM-768 is equivalent to X25519 within
+$\pm$5\,\% in \RevPrimaryEq{} of 8 pre-registered cells on each architecture, and in the two
+small-object write cells that were inconclusive once they were repeated with adequate power;
+but only a saturated client can show a difference at all. Where the Python client did,
+\RevHotDeficit--\ArmHotDeficit\,\%, two pre-registered controls traced it to the library
+binding and not to ML-KEM or, for the most part, its larger ciphertext. A native reader on one
+core was \AudNOneMlkemDeficit\,\% slower with ML-KEM and \AudNOneXwingDeficit\,\% with X-Wing,
+which its implementations' CPU cost explains. The throughput cost of post-quantum key
+establishment in this setting is therefore a property of the client implementation, bounded by
+the ratio of CPU per request and absent unless the client is saturated; the cost that every
+implementation pays is \RevMetaIntrinsic{} bytes of ciphertext per object.
 
-These results should not be extended to native clients, distributed object stores, other S3
-implementations or wide-area deployments without new measurements. The experiments of
-Section~\ref{sec:pending}, above all a native-client replication of the client-bound cells,
-are what would turn this configuration-specific result into a general one.
+These results describe two clients, one single-node store and one cloud provider, and the
+native reader covers the GET path only. They should not be extended to distributed object
+stores, other S3 implementations, other libraries or wide-area deployments without new
+measurements (Section~\ref{sec:pending}).
 
 \section*{Artifact Availability}
 Code, configurations, the pre-registration, per-run summaries, the raw-data validator and the
 analysis scripts that generate every figure, table and number in this paper
 (\texttt{analysis/summarize.py}, \texttt{final\_analysis.py}, \texttt{make\_paper\_assets.py},
-\texttt{revision\_assets.py}) are in the project repository, organized following ACM artifact
+\texttt{revision\_assets.py}, \texttt{audit\_assets.py}) and the native reader (\texttt{native/}) are in the project repository, organized following ACM artifact
 guidelines~\cite{acmbadges}; the configuration files record the random seed of every batch. The
 raw request records (about 11\,GB compressed) are archived separately. The repository is not yet
 public and has no persistent identifier; both, and an external timestamp for the

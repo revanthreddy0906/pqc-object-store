@@ -37,3 +37,4 @@ experiments/*.log
 # compiled paper (rebuild with: cd paper && tectonic -X compile main.tex)
 paper/main.pdf
 native/pqcnative-linux-amd64
+native/pqcmicro-linux-amd64

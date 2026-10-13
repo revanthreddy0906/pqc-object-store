@@ -3,6 +3,8 @@
 Manuscript: *Benchmarking Post-Quantum Key Encapsulation in S3-Compatible Object Storage under
 Client Concurrency* (`paper/main.tex`, 18 pages in IEEE conference format).
 
+**Read the addendum at the end first.** Sections A to E below were written before batches J to N existed and before the second audit; table and section numbers in them refer to the manuscript at commit `4c385e8`. The addendum records what the new experiments showed, what the second audit changed, and what is still open.
+
 This document holds deliverables A, C, D and E and the change log. Deliverable B is the revised
 manuscript itself. No new experiment was run for this revision: every new number comes from
 re-analysing data that already existed, through `analysis/revision_assets.py`. Experiments the
@@ -217,3 +219,111 @@ The Tail at Scale, COSBench, pqm4, eBACS/SUPERCOP. See "Recommendations not foll
 | 18 | Conclusion ended on a list of future work | Conclusion states the scope and names the decisive open experiment | Sec. 8 |
 | 19 | Artifact section implied availability | States that the repository is not public and has no identifier | M7 |
 | 20 | Two analysis lists claimed more pre-specification than there was | The list of analyses that were not pre-specified now includes the new ones | Integrity |
+
+
+---
+
+# Addendum (13 October 2026, evening): second audit and batches J to N
+
+## What was run
+
+Five pre-registered batches on a fresh x86 testbed, plus a native client. Every
+pre-registration was pushed to GitHub before the first run of the batch it governs; the push
+times are in `docs/preregistration-timestamps.md`.
+
+| Batch | Runs | Question | Result by the pre-registered rule |
+|---|---|---|---|
+| J | 120 | Does a manifest as large as ML-KEM's explain the Python client's deficit? | **No.** Padding costs 0.7 % (ratio 0.993, 90 % CI 0.991–0.995); ML-KEM is still 3.3 % slower than the padded control. Manifest size accounts for 17 % of the deficit (CI 14–21 %) |
+| K | 200 | Are the two 64 KiB PUT cells equivalent with adequate power (50 repetitions)? | **Yes, both.** 0.994 (0.984–1.004) at 32 workers, 0.996 (0.979–1.013) at 128; unchanged without stalled runs |
+| L | 120 | Does the Python library binding explain the deficit? | **Yes.** ML-KEM through one foreign call reaches 0.999 (0.997–1.002) of X25519's throughput; through the binding, in the same batch, 0.963 (0.960–0.967). Holding or releasing the interpreter lock makes no difference |
+| M, MT | 40 | Is the 1 MiB one-worker anomaly an allocator effect? | **Supported.** AES-GCM stage time varies 3.2-fold between modes with the default allocator and 1.1-fold with a fixed mmap threshold |
+| N | 90 | Does a native (Go) reader show a deficit when saturated? | **Yes, a larger one.** On one core: ML-KEM 0.905 (0.900–0.910), X-Wing 0.826 (0.821–0.831) of X25519's throughput |
+
+All 570 runs completed without a failed request. The testbed was destroyed afterwards; no
+instance, disk or snapshot remains.
+
+## How the paper's thesis changed
+
+- **Before:** ML-KEM is 4–5 % slower on a saturated client; the cause is probably its larger
+  manifest; unproven.
+- **Now:** the Python client's deficit is an artifact of the binding, which makes four foreign
+  calls per decapsulation. The manifest is a minor part. A native client does show a cost
+  (9.5 % for ML-KEM, 17.4 % for X-Wing on one core), because Go's ML-KEM takes more CPU than its
+  X25519, where liboqs's takes less. In every case the throughput ratio equals the inverse
+  ratio of client CPU per request. The cost is a property of the implementation, appears only
+  under client saturation, and can have either sign.
+
+The earlier text's leading hypothesis (the manifest) was wrong. It was labelled a hypothesis and
+is now reported as refuted for the most part.
+
+## Second audit: findings and actions
+
+| ID | Finding | Action | Status |
+|---|---|---|---|
+| C1 | Mechanism 87 % unattributed | Batches J and L, with decision rules fixed in advance. The audit's binding hypothesis was confirmed in the library source (four foreign calls per decapsulation) and then by experiment | **Resolved** for the Python client |
+| C2 | Only informative effect measured on an instrument that may cause it | Batch N with a Go reader. The Python effect was indeed caused by the instrument; the native client shows a different, larger effect of its own | **Partly resolved**: GET path, three modes, one object size, saturation on one core only |
+| C3 | Pre-registration timing unverifiable; artifact not public | GitHub's push log shows the first pre-registration pushed 19 hours before the first run; times are recorded. The repository is still private | **Partly resolved**; making it public is the authors' step |
+| J1 | Primary family mis-targeted | Stated wherever the result appears (seven of eight cells could not show an effect) | Done (disclosure) |
+| J2 | 1,412 bytes conflates encoding with ciphertext | Now reported separately: 1,056 bytes intrinsic, 356 bytes of JSON/base64 encoding | Done |
+| J3 | Two-object manifest design not representative | Stated, with the S3 calls per operation and the reason for the design | Done (justification); no in-metadata variant was built |
+| J4 | Missing literature; outdated drafts | Added STREAM (CRYPTO 2015), KEMTLS (CCS 2020) and age v1.3.0; HPKE draft updated to version 05 | Done |
+| J5 | Finding 7 contradicted Finding 5 | CPU statement scoped to one worker, with the contention figure beside it | Done |
+| – | Underpowered cells | Batch K | Done |
+| – | CPU identity untested out of sample | One advance prediction (0.956) for batches J and L: observed 0.960 and 0.963, both intervals exclude the prediction. Reported as a miss of 0.4 and 0.7 points | Done, with a negative nuance |
+| – | 1 MiB AES-GCM anomaly | Batches M and MT | Done |
+| – | 158 MiB server-memory outlier | Explained in the text: one run of five | Done |
+| – | Ten finding boxes, off-thesis queueing section | Six finding boxes; queueing moved to an appendix | Done |
+| – | Abstract's first sentence overstated the threat | Reworded to keys established with RSA or elliptic curves | Done |
+
+### Where the second audit was wrong
+
+- **X-Wing draft version 11 exists** (23 September 2026, IETF datatracker). The citation stands.
+- **The pre-registration can be timestamped** from the hosting service's push log; it does not
+  need to be recreated.
+
+### Not done from the second audit
+
+- Signal PQXDH, Apple PQ3 and vendor PQ-TLS reports were not added: they would support no
+  statement the paper makes.
+- No binary in-metadata manifest variant was built.
+- Access dates were not added to vendor documentation entries that were not re-fetched.
+- The title was kept.
+
+## Integrity notes
+
+- **A wrong hypothesis was in the previous version.** It said the larger manifest was the
+  largest measured stage difference and the leading candidate. Batch J shows it explains 17 %.
+- **One pre-registration was pushed five minutes after a batch started.** Version 1.12 (batch L
+  and a prediction for batch J) was pushed at 05:36 UTC; batch J had started at 05:31. No batch J
+  data had been downloaded; the request counts of its first two runs had been seen in the log.
+- **A local exploratory test preceded batch L.** On the development laptop, decapsulation under
+  16 threads cost 60 µs through the binding against 16–33 µs through one call. It motivated the
+  batch and is recorded in the pre-registration; it is not used as evidence in the paper.
+- **The native timing of single operations is exploratory**, not part of batch N.
+- **Transfers overlapped earlier batches.** During the confirmatory x86 chain, completed batches
+  were downloaded while parts of batches F, G and H ran. This may have added noise to those runs;
+  it cannot favour a mode. It did not affect the primary-family batches or batches J to N.
+- **The disk baseline of the J–N testbed did not complete.** Its network baseline did.
+- **Cost.** These batches were estimated at about $15; the account's month-to-date figure rose
+  further than the estimates given during the work, mainly because tax and idle time had not
+  been counted.
+
+## Still open after this revision
+
+1. **The native client is minimal.** GET only, three modes, 64 KiB objects, different
+   cryptographic libraries from the Python client, and saturated only when confined to one core.
+   Library and language are not separated.
+2. **One unexplained native result.** At 16 cores and 128 workers ML-KEM is 5.7 % slower although
+   the client is not CPU-saturated by the pre-registered criterion.
+3. **A 4 µs key-derivation difference** between ML-KEM and X25519 in the Python client is still
+   unexplained, and X-Wing keeps a small residual in the allocator diagnostic.
+4. **HPKE was not benchmarked**, and the envelope is not HPKE-conformant.
+5. **Baselines are narrow** and the store is a single-node, archived community edition.
+6. **Queueing results** rest on very few held-out points and one mode.
+7. **The repository is private** and has no DOI.
+8. **Declarations are missing:** funding, conflicts of interest, author contributions and
+   generative-AI use. An AI assistant was used extensively for code, analysis and drafting; this
+   must be disclosed accurately under the target journal's policy.
+9. **Not searched:** IEEE Xplore and the ACM Digital Library. Two 2026 preprints are still
+   described from their abstracts.
+10. **The paper is 20 pages** in IEEE conference format; a journal will need its own template.

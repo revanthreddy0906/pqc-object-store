@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.14 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.15 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.14 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.15 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -578,6 +578,33 @@ T([["Version", "Date", "Change", "Status"],
                            "baselines, a second store. Diagnostic batches M and MT (v1.13) are "
                            "run only if time remains after batch N; if not, the 1 MiB anomaly "
                            "stays unexplained and the paper says so.",
+    "Pending team review (§1.3)"],
+   ["1.15", "13 Oct 2026", "RESULTS of batches J, K, L, M, MT (480 runs, Python client) and N (90 "
+                           "runs, native reader); no failed request. J: C2/B2 0.993 [0.991, "
+                           "0.995], P1/C2 0.967 [0.965, 0.969], P1/B2 0.960 at 64 KiB GET, 500 "
+                           "workers; by the v1.11 rule manifest size does NOT explain the "
+                           "deficit (share 17%, 90% CI 14-21%). K: P1/B2 0.994 [0.984, 1.004] at "
+                           "32 workers and 0.996 [0.979, 1.013] at 128, both equivalent (Holm), "
+                           "also without the 6 stalled runs. L: P1/B2 0.963 [0.960, 0.967], "
+                           "H1/B2 0.999 [0.997, 1.002], G1/B2 1.002 [0.997, 1.006]; by the v1.12 "
+                           "rule the binding EXPLAINS the deficit; G1/H1 1.002, so the lock "
+                           "policy does not matter. Prediction 0.956 missed by 0.4 (J) and 0.7 "
+                           "(L) points, outside both intervals. M/MT: AES-GCM stage 0.12-0.38 "
+                           "ms across modes by default, 0.29-0.32 ms with a fixed mmap "
+                           "threshold: allocator effect supported. N (v1.14): one core, 128 "
+                           "workers, client saturated: P1/B2 0.905 [0.900, 0.910], P3/B2 0.826 "
+                           "[0.821, 0.831], both 'deficit'; CPU-per-request ratios 1.105 and "
+                           "1.211. 16 cores: not saturated; 500 workers 0.996 and 0.989; 128 "
+                           "workers 0.943 and 0.923, unexplained. Exploratory single-thread "
+                           "timing in Go on the testbed: ML-KEM-768 decapsulation 50.6 us, "
+                           "X25519 33.4 us, X-Wing 85.1 us. DEVIATIONS: v1.12 pushed 5 min "
+                           "after batch J started; batches M and MT were run after L and before "
+                           "N, not after N; batch N ran at commit 8fffef9 (code identical to "
+                           "the registered commit for the native reader). Testbed destroyed. "
+                           "Paper thesis revised: the Python client's deficit is a binding "
+                           "artifact; a native client shows an implementation-specific cost; "
+                           "throughput ratio = inverse CPU-per-request ratio under saturation. "
+                           "See the addendum of paper/audit-response.md.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1341,7 +1368,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.14",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.15",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])

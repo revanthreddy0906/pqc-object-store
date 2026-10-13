@@ -248,8 +248,21 @@ def batch_n(path: Path, out: Path, results: Path, m: Macros) -> None:
                     verdict = ("no deficit" if two_pct(logs) < 0.05 else "deficit" if hi < 0.98
                                else "advantage" if lo > 1.02 else "inconclusive")
                     m.add(f"AudN{tag}{name}Verdict", verdict)
-                    m.add(f"AudN{tag}{name}Change", num((r - 1) * 100, 1))
+                    m.add(f"AudN{tag}{name}Deficit", num((1 - r) * 100, 1))
         rows.append(line)
+    one = cells[(1, 128)]
+    for mode, name in (("P1", "Mlkem"), ("P3", "Xwing")):
+        delta = statistics.fmean((one[mode][rep]["cpu_ms_per_req"] - one["B2"][rep]["cpu_ms_per_req"])
+                                 * 1000 for rep in one["B2"])
+        m.add(f"AudNOne{name}CpuDelta", num(delta, 0))
+    micro = path.parent / "micro.json"
+    if micro.is_file():
+        first = json.loads(micro.read_text().splitlines()[0])
+        m.add("AudNMicroMlkem", num(first["mlkem768_decaps_ns"] / 1000, 1))
+        m.add("AudNMicroEcdh", num(first["x25519_ns"] / 1000, 1))
+        m.add("AudNMicroXwing", num(first["xwing_decaps_ns"] / 1000, 1))
+        m.add("AudNMicroMlkemExtra", num((first["mlkem768_decaps_ns"] - first["x25519_ns"]) / 1000, 0))
+        m.add("AudNMicroXwingExtra", num((first["xwing_decaps_ns"] - first["x25519_ns"]) / 1000, 0))
     fa.write_csv(results / "native.csv", table)
     tex_table(out / "tab-native.tex",
               ["Cell", "req/s", "Cores", "CPU (\\textmu s)", "Throughput", "CPU/request",
