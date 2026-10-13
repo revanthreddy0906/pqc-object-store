@@ -14,6 +14,7 @@
 
 \input{generated/numbers.tex}
 \input{generated/revision.tex}
+\input{generated/audit.tex}
 
 % One-sentence result statement after each analysis (systems-paper convention).
 \newcommand{\finding}[2]{\par\smallskip\noindent\fbox{\parbox{\dimexpr\columnwidth-2\fboxsep-2\fboxrule\relax}{\small\textbf{Finding~#1.} #2}}\par\smallskip}
@@ -130,7 +131,7 @@ exposed per root (Section~\ref{sec:tradeoff}).
 \end{itemize}
 Two supporting elements are not claimed as contributions. The architecture and commit protocol
 support C1 and are not a new cryptographic construction (Table~\ref{tab:claims}). The open-loop
-capacity observations of Section~\ref{sec:queue} describe the store, not post-quantum
+capacity observations of Appendix~\ref{sec:queue} describe the store, not post-quantum
 cryptography, and their main lesson is known~\cite{schroeder2006}.
 
 \textbf{Research questions.} \textbf{RQ1:} What does per-object ML-KEM-768 add to latency,
@@ -200,14 +201,6 @@ GET of whole objects; the S3 interface is the de facto standard~\cite{gadban2021
 MinIO~\cite{minio}, compiled from its final community release (\MinioRelease). Because that
 community edition is no longer developed, our store-specific results (ceilings, knee) should be
 read as those of one representative single-node S3 server, not as current product behaviour.
-
-\subsection{Queueing Models}
-An M/M/c queue has Poisson arrivals at rate $\lambda$, $c$ servers and exponential service times
-with mean $S$~\cite{harchol2013}. With $a=\lambda S$ the mean response time is
-$W=S+C(c,a)\,S/(c-a)$, where $C$ is the Erlang~C probability of waiting. Its service time does
-not depend on load. A \emph{state-dependent} birth--death queue lets the total service rate
-$\mu(n)$ depend on the number $n$ of requests in the system; its stationary distribution is
-$p_n\propto\prod_{k\le n}\lambda/\mu(k)$ and its mean response time follows from Little's law.
 
 \section{Related Work}\label{sec:related}
 Table~\ref{tab:gap} positions this study. The entries describe the scope of each work, not a
@@ -706,7 +699,7 @@ difference''.
 margin the exploratory campaign had already used. Its practical meaning is a provisioning one: a
 5\,\% loss of capacity raises utilization by the same factor, so a deployment planned at or
 below \RevMarginUtil{} of peak throughput stays under the stability boundary we measure in
-Section~\ref{sec:queue} and needs no additional capacity. That argument uses a result of this
+Appendix~\ref{sec:queue} and needs no additional capacity. That argument uses a result of this
 study and was made after the fact; an operator with a tighter target needs a tighter margin,
 which is why we report sensitivity at $\pm$2\,\% and $\pm$10\,\%
 \cite{lakens2017}.
@@ -739,13 +732,6 @@ from 10 or 20 pairs. As a check we recompute each primary verdict from a percent
 \textbf{Stall rule.} Fixed in advance and blind to the mode: a closed-loop run is a \emph{stall}
 if its server CPU is below 0.8 times and its throughput below 0.9 times the median of its own
 cell. The primary analysis uses all runs; excluding stalls is a sensitivity analysis.
-
-\subsection{Queueing Protocol}\label{sec:qprotocol}
-The 12 open-loop rates are sorted; the 1st, 3rd, \ldots{} are training points and the 2nd, 4th,
-\ldots{} are held out. Models may use training points and the closed-loop runs, and are scored by
-mean absolute percentage error (MAPE) on the held-out rates at which the system was stable. A
-rate is stable if every run delivers at least 97\,\% of the offered rate with a mean queue wait
-below 10\,ms; response times of unstable runs grow with run length and are lower bounds.
 
 \subsection{Deviations from the Pre-Registration}
 (1) The first attempt at batch E was cut off after 134 of 300 runs when an account-level spending
@@ -808,9 +794,6 @@ on GET: its median latency is \HthreeSmallOnePct\,\% above P1 at 64\,KiB and
 \label{fig:size}
 \end{figure}
 
-\finding{2}{Storage round trips dominate request time at every object size; ML-KEM's share is
-largest for the smallest objects and stays at a few percent.}
-
 \subsection{Concurrency and Bottlenecks (RQ2)}\label{sec:bottleneck}
 Fig.~\ref{fig:throughput} shows throughput from 1 to 500 workers. All modes reach the same
 ceilings. GETs of 1\,MiB and more saturate the network at \NetCeilingMiB\,MiB/s,
@@ -860,10 +843,6 @@ to a named MinIO component.
 \input{generated/tab-profile.tex}
 \end{table}
 
-\finding{3}{Every workload is limited by the network, the storage server or the client CPU, and
-all modes reach the same limit, except RSA-4096 on small reads. The small-object write ceiling
-is lock and namespace contention in the server's metadata path; the disk is far from its limits.}
-
 \subsection{ML-KEM against X25519 (Confirmatory)}\label{sec:primary}
 Table~\ref{tab:tost} and Fig.~\ref{fig:tost} give the pre-registered result. On the x86 client
 ML-KEM-768 is equivalent to X25519 in \RevPrimaryEq{} of the 8 cells after Holm correction and
@@ -894,6 +873,21 @@ workers is inconclusive on both: at its observed standard deviation ten repetiti
 test a power of only \RevPowerNoisy\,\%, and about \RevPowerNoisyNeeded{} would be needed for
 80\,\%. Our power calculation, based on the exploratory campaign's lower variance, was too
 optimistic for this cell.
+
+\emph{Follow-up with adequate power.} Because those two cells were under-powered, we
+pre-registered and ran them again with 50 repetitions each (batch K, \AudKRuns{} runs,
+Table~\ref{tab:power}). Both are now equivalent: \AudKKneeRatio{} (90\,\% CI \AudKKneeCI) at 32
+workers and \AudKSatRatio{} (\AudKSatCI) at 128, also when the \AudKStalls{} stalled runs are
+excluded. This is a new test on new data, on another server instance; it does not change the
+verdicts of Table~\ref{tab:tost}, which stand as the outcome of the original family.
+
+\begin{table}[t]
+\caption{Batch K: the two 64\,KiB PUT cells of the primary family repeated with 50 repetitions. Paired throughput ratio ML-KEM-768/X25519, TOST at $\pm$5\,\%, Holm-adjusted over the two cells; the last column gives the number of pairs and the verdict when stalled runs are excluded.}
+\label{tab:power}
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{\input{generated/tab-power.tex}}
+\end{table}
 
 \emph{The cost is visible in CPU even where throughput does not move.}
 Table~\ref{tab:cpuprimary} gives the ratio of client CPU per request. Its interval excludes 1 in
@@ -945,7 +939,7 @@ inconclusive, \HoneDiff{} different. It showed the same client-bound deficit at 
 \resizebox{\columnwidth}{!}{\input{generated/tab-h1.tex}}
 \end{table}
 
-\finding{4}{In the pre-registered comparison ML-KEM-768 is equivalent to X25519 within
+\finding{2}{In the pre-registered comparison ML-KEM-768 is equivalent to X25519 within
 $\pm$5\,\% in \RevPrimaryEq{} of 8 cells on each architecture and nowhere non-equivalent, mostly
 because only one of those cells has a saturated client. There it is
 \RevHotDeficit--\ArmHotDeficit\,\% slower, and small-object write cells are too noisy to
@@ -1014,7 +1008,7 @@ else in the KEM binding that only appears under contention. A control that pads 
 ML-KEM's size would separate ciphertext size from KEM computation directly; we have not run it
 (Section~\ref{sec:pending}).
 
-\finding{5}{The client-bound deficit is entirely a difference in client CPU per request.
+\finding{3}{The client-bound deficit is entirely a difference in client CPU per request.
 Decapsulation is not its source. The largest stage difference we can measure is the handling of
 ML-KEM's larger manifest, but most of the extra CPU is unattributed, pending a control.}
 
@@ -1066,11 +1060,6 @@ P2, located in the AES-GCM stage timer, which all modes share.
 \input{generated/tab-hybrid.tex}
 \end{table*}
 
-\finding{6}{A standards-aligned hybrid is affordable wherever the network or the server limits
-throughput. Where the client CPU is saturated, X-Wing costs
-\RevXwingHotDeficit--\ArmXwingHotDeficit\,\% of throughput against X25519 and
-\RevXwingVsMlkemHotDeficit--\ArmXwingVsMlkemHotDeficit\,\% against ML-KEM alone in this stack.}
-
 \subsection{CPU and Memory (RQ1)}
 Table~\ref{tab:resources} lists CPU and memory for representative workloads of the exploratory
 campaign. Per request, P1 uses between \HfourBtwoMin{} and \HfourBtwoMax\,ms more client CPU than
@@ -1091,10 +1080,6 @@ four runs of that cell grew by at most \ServerGrowthOtherRuns\,MiB.
 \centering\footnotesize
 \input{generated/tab-resources.tex}
 \end{table*}
-
-\finding{7}{At one worker ML-KEM's CPU cost per request is within a few hundredths of a
-millisecond of X25519's; under contention the gap grows to about a tenth of a millisecond.
-Neither client nor server memory depends on the key-establishment mode.}
 
 \subsection{Metadata at Scale (RQ1)}
 The lasting cost of post-quantum key establishment is storage. Table~\ref{tab:meta} converts the
@@ -1129,80 +1114,10 @@ data; they overstate both the bytes and the request count of a metadata-based de
 \resizebox{\columnwidth}{!}{\input{generated/tab-meta.tex}}
 \end{table}
 
-\finding{8}{ML-KEM-768 adds \RevMetaIntrinsic{} bytes of ciphertext per object, and
+\finding{4}{ML-KEM-768 adds \RevMetaIntrinsic{} bytes of ciphertext per object, and
 \RevMetaExtraMLKEM{} in our JSON encoding: irrelevant for large objects, dominant for
 kilobyte-sized ones, and \RevMetaIntrinsicBillionTB--\RevMetaBillionTB\,TB per billion objects
 before redundancy.}
-
-\subsection{Open-Loop Capacity (RQ3)}\label{sec:queue}
-This subsection describes the store, not post-quantum cryptography, and we include it for one
-reason: to check that the choice of mode does not move the point of degradation. That closed-loop
-measurements overstate what an open arrival stream can sustain is established
-\cite{schroeder2006}; what we add is where the transition lies for this store.
-
-\textbf{Two thresholds.} We distinguish the \emph{knee}, the interval of offered load in which
-mean response time first exceeds twice its light-load value, from the \emph{stability boundary},
-between the highest rate at which every run kept up and the lowest at which one did not. Under
-Poisson arrivals of ML-KEM PUTs (batch H), with $\rho$ the offered rate over the peak closed-loop
-throughput of the same batch (\RevQSmallPeak{} and \RevQMidPeak{} requests/s): at 1\,KiB the
-knee and the stability boundary coincide, between \RevQSmallKneeLo{} and \RevQSmallKneeHi{}
-requests/s ($\rho=\RevQSmallRhoKneeLo$--\RevQSmallRhoKneeHi); at 64\,KiB the knee lies between
-\RevQMidKneeLo{} and \RevQMidKneeHi{} requests/s ($\rho=\RevQMidRhoKneeLo$--\RevQMidRhoKneeHi)
-and the stability boundary one step higher, between \RevQMidLastStable{} and
-\RevQMidFirstUnstable{} ($\rho=\RevQMidRhoLastStable$--\RevQMidRhoFirstUnstable). The
-confirmatory campaign measured ML-KEM only; the exploratory campaign found the knee in the same
-place for the symmetric-only mode B1 and for P1, which is our evidence that the mode does not
-move it.
-
-\textbf{Models.} We compare three models (Fig.~\ref{fig:queuerev}, Table~\ref{tab:queue}).
-(a)~M/M/$c$ with the light-load service time $S_0$, capacity $\mu$ from the two most overloaded
-training rates and $c=\mathrm{round}(\mu S_0)$. (b)~A state-dependent queue whose service rate
-$\mu(n)$ is the closed-loop throughput measured with $n$ workers, interpolated linearly; it uses
-no open-loop data at all. (c)~A load-dependent fit
-$W(\rho)=S_0\,[1+a\rho^{b}/(1-\rho)]$ with $\rho=\lambda/\mu$, whose two parameters are fitted to
-the stable training rates.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{generated/fig-queue-rev.pdf}
-\caption{Open-loop mean response time of ML-KEM PUT against offered load (batch H; log scale), with three models. Filled: training rates; hollow: held-out rates; crosses: unstable rates (lower bounds).}
-\label{fig:queuerev}
-\end{figure}
-
-\begin{table}[t]
-\caption{Queueing models for ML-KEM PUT (requests/s). Stable/unstable: the stability boundary, i.e.\ highest stable and lowest unstable offered rate. Observed knee: interval in which mean response time first exceeds twice its light-load value; predicted knee: the rate at which each model does.}
-\label{tab:queue}
-\centering\footnotesize
-\setlength{\tabcolsep}{2.5pt}
-\resizebox{\columnwidth}{!}{\input{generated/tab-queue.tex}}
-\end{table}
-
-On the stable held-out rates (only \RevQSmallHeldOut{} at 1\,KiB and \RevQMidHeldOut{} at
-64\,KiB), M/M/$c$ has a MAPE of \RevQSmallMapeMmc\,\% and \RevQMidMapeMmc\,\%; the
-state-dependent model \RevQSmallMapeState\,\% and \RevQMidMapeState\,\%; the load-dependent fit
-\RevQSmallMapeLoad\,\% and \RevQMidMapeLoad\,\%. The two alternatives are close to each other
-but not identical. Both roughly halve the error because they let service time
-rise with load, which M/M/$c$ cannot: the mean service time of a 1\,KiB PUT grows from
-\RevQSmallServiceLight\,ms at the lightest rate to about \RevQSmallServiceOverload\,ms in
-overload.
-
-\textbf{The knee is still predicted too late.} M/M/$c$ places the knee at \RevQSmallKneeMmc{} and
-\RevQMidKneeMmc{} requests/s and the state-dependent model at \RevQSmallKneeState{} and
-\RevQMidKneeState, both above the observed intervals. The fitted model matches at 64\,KiB
-(\RevQMidKneeLoad) and is late at 1\,KiB (\RevQSmallKneeLoad). The reason is visible in the data:
-the state-dependent model assumes the store can sustain its mean closed-loop throughput, but in
-overload the open-loop runs achieved only \RevQSmallOverload{} and \RevQMidOverload{} requests/s,
-below the closed-loop peaks, and closed-loop throughput itself varies by several percent between
-runs at high concurrency. A system whose capacity fluctuates becomes unstable when the offered
-rate reaches the lower part of that range, not its mean. With only \RevQSmallHeldOut{} and
-\RevQMidHeldOut{} stable held-out points per size, these error figures are indicative rather than
-precise, and the fitted model is a description of this configuration, not a general law.
-
-\finding{9}{For this store, response time doubles at
-\RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop throughput and runs become unstable
-at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable. Letting service time depend on load halves
-the prediction error of M/M/c below the knee, on very few held-out points; no model we tested
-predicts the knee from closed-loop capacity.}
 
 \section{Security--Performance Trade-off}\label{sec:tradeoff}
 \subsection{What a Session Exposes}
@@ -1263,7 +1178,7 @@ The same reasoning applies to the choice between ML-KEM and a hybrid: where the 
 bottleneck the hybrid costs only \RevMetaXwingOverMLKEM{} bytes per object, and where it is, the
 cost is the throughput difference reported in Section~\ref{sec:hybrid}.
 
-\finding{10}{Sessions trade compromise scope for a
+\finding{5}{Sessions trade compromise scope for a
 \RevSessCpuSavingLo--\RevSessCpuSavingHi\,\% saving in client CPU. That saving
 becomes throughput only on client-bound workloads; a bound of 10 objects captures most of it.}
 
@@ -1333,8 +1248,6 @@ client-bound cells, to separate ciphertext handling from KEM computation.
 (2)~\emph{Native client:} the client-bound cells with a compiled client, as a new pre-registered
 family with client CPU per request as a co-primary endpoint, to learn whether the deficit grows
 or shrinks when the interpreter is removed.
-(3)~\emph{More repetitions of 64\,KiB PUT:} about \RevPowerNoisyNeeded{} per cell, or removal of
-those cells from the confirmatory family.
 (4)~\emph{An HPKE-conformant envelope}, to confirm that the per-object costs transfer.
 (5)~\emph{Wider baselines:} ML-KEM-1024, RSA-3072 and a remote key-service wrap.
 (6)~\emph{A distributed or second S3 implementation}, and runs of 10 to 30 minutes, for the
@@ -1396,6 +1309,98 @@ guidelines~\cite{acmbadges}; the configuration files record the random seed of e
 raw request records (about 11\,GB compressed) are archived separately. The repository is not yet
 public and has no persistent identifier; both, and an external timestamp for the
 pre-registration, are required before submission.
+
+\appendix
+\section{Open-Loop Capacity of the Store}\label{sec:queue}
+This appendix characterizes the store, not post-quantum cryptography. It is included to check that the key-establishment mode does not move the point at which response time degrades.
+
+\subsection{Queueing Models}
+An M/M/c queue has Poisson arrivals at rate $\lambda$, $c$ servers and exponential service times
+with mean $S$~\cite{harchol2013}. With $a=\lambda S$ the mean response time is
+$W=S+C(c,a)\,S/(c-a)$, where $C$ is the Erlang~C probability of waiting. Its service time does
+not depend on load. A \emph{state-dependent} birth--death queue lets the total service rate
+$\mu(n)$ depend on the number $n$ of requests in the system; its stationary distribution is
+$p_n\propto\prod_{k\le n}\lambda/\mu(k)$ and its mean response time follows from Little's law.
+
+
+\subsection{Queueing Protocol}\label{sec:qprotocol}
+The 12 open-loop rates are sorted; the 1st, 3rd, \ldots{} are training points and the 2nd, 4th,
+\ldots{} are held out. Models may use training points and the closed-loop runs, and are scored by
+mean absolute percentage error (MAPE) on the held-out rates at which the system was stable. A
+rate is stable if every run delivers at least 97\,\% of the offered rate with a mean queue wait
+below 10\,ms; response times of unstable runs grow with run length and are lower bounds.
+
+
+\subsection{Results}
+This subsection describes the store, not post-quantum cryptography, and we include it for one
+reason: to check that the choice of mode does not move the point of degradation. That closed-loop
+measurements overstate what an open arrival stream can sustain is established
+\cite{schroeder2006}; what we add is where the transition lies for this store.
+
+\textbf{Two thresholds.} We distinguish the \emph{knee}, the interval of offered load in which
+mean response time first exceeds twice its light-load value, from the \emph{stability boundary},
+between the highest rate at which every run kept up and the lowest at which one did not. Under
+Poisson arrivals of ML-KEM PUTs (batch H), with $\rho$ the offered rate over the peak closed-loop
+throughput of the same batch (\RevQSmallPeak{} and \RevQMidPeak{} requests/s): at 1\,KiB the
+knee and the stability boundary coincide, between \RevQSmallKneeLo{} and \RevQSmallKneeHi{}
+requests/s ($\rho=\RevQSmallRhoKneeLo$--\RevQSmallRhoKneeHi); at 64\,KiB the knee lies between
+\RevQMidKneeLo{} and \RevQMidKneeHi{} requests/s ($\rho=\RevQMidRhoKneeLo$--\RevQMidRhoKneeHi)
+and the stability boundary one step higher, between \RevQMidLastStable{} and
+\RevQMidFirstUnstable{} ($\rho=\RevQMidRhoLastStable$--\RevQMidRhoFirstUnstable). The
+confirmatory campaign measured ML-KEM only; the exploratory campaign found the knee in the same
+place for the symmetric-only mode B1 and for P1, which is our evidence that the mode does not
+move it.
+
+\textbf{Models.} We compare three models (Fig.~\ref{fig:queuerev}, Table~\ref{tab:queue}).
+(a)~M/M/$c$ with the light-load service time $S_0$, capacity $\mu$ from the two most overloaded
+training rates and $c=\mathrm{round}(\mu S_0)$. (b)~A state-dependent queue whose service rate
+$\mu(n)$ is the closed-loop throughput measured with $n$ workers, interpolated linearly; it uses
+no open-loop data at all. (c)~A load-dependent fit
+$W(\rho)=S_0\,[1+a\rho^{b}/(1-\rho)]$ with $\rho=\lambda/\mu$, whose two parameters are fitted to
+the stable training rates.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{generated/fig-queue-rev.pdf}
+\caption{Open-loop mean response time of ML-KEM PUT against offered load (batch H; log scale), with three models. Filled: training rates; hollow: held-out rates; crosses: unstable rates (lower bounds).}
+\label{fig:queuerev}
+\end{figure}
+
+\begin{table}[t]
+\caption{Queueing models for ML-KEM PUT (requests/s). Stable/unstable: the stability boundary, i.e.\ highest stable and lowest unstable offered rate. Observed knee: interval in which mean response time first exceeds twice its light-load value; predicted knee: the rate at which each model does.}
+\label{tab:queue}
+\centering\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\columnwidth}{!}{\input{generated/tab-queue.tex}}
+\end{table}
+
+On the stable held-out rates (only \RevQSmallHeldOut{} at 1\,KiB and \RevQMidHeldOut{} at
+64\,KiB), M/M/$c$ has a MAPE of \RevQSmallMapeMmc\,\% and \RevQMidMapeMmc\,\%; the
+state-dependent model \RevQSmallMapeState\,\% and \RevQMidMapeState\,\%; the load-dependent fit
+\RevQSmallMapeLoad\,\% and \RevQMidMapeLoad\,\%. The two alternatives are close to each other
+but not identical. Both roughly halve the error because they let service time
+rise with load, which M/M/$c$ cannot: the mean service time of a 1\,KiB PUT grows from
+\RevQSmallServiceLight\,ms at the lightest rate to about \RevQSmallServiceOverload\,ms in
+overload.
+
+\textbf{The knee is still predicted too late.} M/M/$c$ places the knee at \RevQSmallKneeMmc{} and
+\RevQMidKneeMmc{} requests/s and the state-dependent model at \RevQSmallKneeState{} and
+\RevQMidKneeState, both above the observed intervals. The fitted model matches at 64\,KiB
+(\RevQMidKneeLoad) and is late at 1\,KiB (\RevQSmallKneeLoad). The reason is visible in the data:
+the state-dependent model assumes the store can sustain its mean closed-loop throughput, but in
+overload the open-loop runs achieved only \RevQSmallOverload{} and \RevQMidOverload{} requests/s,
+below the closed-loop peaks, and closed-loop throughput itself varies by several percent between
+runs at high concurrency. A system whose capacity fluctuates becomes unstable when the offered
+rate reaches the lower part of that range, not its mean. With only \RevQSmallHeldOut{} and
+\RevQMidHeldOut{} stable held-out points per size, these error figures are indicative rather than
+precise, and the fitted model is a description of this configuration, not a general law.
+
+\textbf{Summary.} For this store, response time doubles at
+\RevQMidRhoKneeLo--\RevQSmallRhoKneeHi{} of peak closed-loop throughput and runs become unstable
+at \RevQSmallRhoLastStable--\RevQMidRhoFirstUnstable. Letting service time depend on load halves
+the prediction error of M/M/c below the knee, on very few held-out points; no model we tested
+predicts the knee from closed-loop capacity.
+
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
