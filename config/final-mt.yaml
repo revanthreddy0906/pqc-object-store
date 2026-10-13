@@ -1,0 +1,21 @@
+# Audit diagnostic for the 1 MiB one-worker PUT anomaly (SoT v1.13): the AES-GCM stage takes
+# 2-3x longer in the hybrid modes although every mode runs the same cipher code, at 1 MiB PUT
+# only. Hypothesis: an allocator effect on the 1 MiB chunk buffer (glibc's dynamic mmap
+# threshold). final-m runs with default allocator settings; final-mt is the same batch started
+# with MALLOC_MMAP_THRESHOLD_ fixed at 256 MiB. This file: started with MALLOC_MMAP_THRESHOLD_=268435456.
+experiment_id: final-mt
+bucket: pqc-bench
+chunk_size: 4194304
+part_size: 8388608
+warmup_s: 5
+duration_s: 20
+settle_max_s: 40
+pool_bytes: 67108864
+repetitions: 5
+get_objects: 8
+seed: 20261021
+blocks:
+  - sizes: [1048576]
+    concurrency: [1]
+    operations: [put]
+    modes: [B2, P1, P2, P3]
