@@ -152,7 +152,7 @@ def on_page(canv, doc):
         canv.setFont("Body", 7.8)
         canv.setFillColor(MUTED)
         canv.drawString(20 * mm, h - 12 * mm, "Team 12 · PQC Cloud Object Store Benchmark")
-        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.12 · 13 Oct 2026")
+        canv.drawRightString(w - 20 * mm, h - 12 * mm, "SOURCE OF TRUTH · v1.13 · 13 Oct 2026")
         canv.setStrokeColor(RULE)
         canv.setLineWidth(0.4)
         canv.line(20 * mm, h - 13.5 * mm, w - 20 * mm, h - 13.5 * mm)
@@ -232,7 +232,7 @@ story.append(Paragraph("ML-KEM-768 + HKDF-SHA256 + AES-256-GCM envelope encrypti
 story.append(Spacer(1, 16 * mm))
 T([["Field", "Value"],
    ["Project", "Team 12 research paper assignment (4 students)"],
-   ["Document", "Project Source of Truth (SoT), version 1.12 (change log in §1.4)"],
+   ["Document", "Project Source of Truth (SoT), version 1.13 (change log in §1.4)"],
    ["Date", "24 September 2026"],
    ["Supersedes", "Implementation Specification v1.0 (pqc-cloud-implementation.pdf) where they conflict; "
                   "corrects the draft paper (pqc-cloud-object-store-benchmark.pdf)"],
@@ -519,6 +519,27 @@ T([["Version", "Date", "Change", "Status"],
                            "predicted to be 0.956 and 0.900 (observed, already known: 0.951 and "
                            "0.896, so (b) is a retrospective cross-architecture check, not a "
                            "blind prediction). Costed at about $3.",
+    "Pending team review (§1.3)"],
+   ["1.13", "13 Oct 2026", "Written before batches M and MT exist. (1) DIAGNOSTIC batches M and "
+                           "MT (exploratory, not confirmatory): 1 MiB PUT, one worker, modes B2, "
+                           "P1, P2, P3, 5 repetitions each. Batch F showed the AES-GCM stage at "
+                           "0.11 ms for B2 and P1 but 0.37 ms (P2) and 0.27 ms (P3) in every "
+                           "run, at 1 MiB PUT only, on x86 and ARM, although all modes run the "
+                           "same cipher code. Hypothesis: an allocator effect on the 1 MiB "
+                           "chunk buffer (glibc dynamic mmap threshold). M uses default "
+                           "allocator settings; MT sets MALLOC_MMAP_THRESHOLD_ to 256 MiB. "
+                           "Expected if the hypothesis holds: the mode difference in the "
+                           "AES-GCM stage appears in M and disappears in MT. Any other outcome "
+                           "leaves the anomaly unexplained. (2) DISCLOSURE: during the "
+                           "confirmatory x86 chain, completed batches were downloaded from the "
+                           "client while later batches were running (E and EK during G and the "
+                           "start of H; G and H during F, about runs 150-190). The transfer "
+                           "used client CPU and network and may have added noise to those runs; "
+                           "mode order is randomized within repetitions, so it cannot favour a "
+                           "mode. Batches E, EK, I, IK, I1, J, K and L were not affected: no "
+                           "transfer ran during them. From now on data is fetched only between "
+                           "batches. (3) The disk baseline (fio) of the J/K/L testbed did not "
+                           "complete; the network baseline did.",
     "Pending team review (§1.3)"]],
   [16, 22, 104, 28])
 
@@ -1282,7 +1303,7 @@ for i, r in enumerate(refs, 1):
 
 out = "source-of-truth.pdf"
 doc = Doc(out, pagesize=A4, leftMargin=20 * mm, rightMargin=20 * mm, topMargin=20 * mm,
-          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.12",
+          bottomMargin=18 * mm, title="PQC Object Store — Source of Truth v1.13",
           author="Team 12", subject="Benchmarking PQC in cloud object stores")
 frame = Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="f")
 doc.addPageTemplates([PageTemplate(id="p", frames=[frame], onPage=on_page)])
