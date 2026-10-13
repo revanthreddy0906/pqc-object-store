@@ -271,6 +271,53 @@ def batch_n(path: Path, out: Path, results: Path, m: Macros) -> None:
               "\\multicolumn{2}{c}{X-Wing / X25519}")
 
 
+def sweep(results: Path, m: Macros) -> None:
+    """Every closed-loop cell in which the Python client ran both ML-KEM (P1) and X25519 (B2),
+    judged by the deficit rule pre-registered for the native reader (SoT v1.14): a deficit if
+    the 90% interval of the paired throughput ratio lies below 0.98, an advantage if above 1.02.
+    Applying that rule outside its own experiment is exploratory."""
+    rows = []
+    for name in ("final", "revision", "revision-arm", "audit"):
+        runs = [r for r in fa.load_runs(Path("results", name, "runs.csv"))
+                if r["experiment"] != "final-p"]
+        fa.flag_stalls(runs)
+        table = fa.cells(runs)
+        for key, cell in table.items():
+            if cell["mode"] != "P1" or cell["loop"] != "closed":
+                continue
+            base = table.get((*key[:6], "B2", 0, False))
+            if not base:
+                continue
+            logs = fa.log_ratios(cell["runs"], base["runs"], "ops_per_s")
+            if len(logs) < 2:
+                continue
+            r, lo, hi = ci90(logs)
+            rows.append({"experiment": cell["experiment"], "operation": cell["operation"],
+                         "size": cell["size"], "concurrency": cell["concurrency"], "n": len(logs),
+                         "ratio": r, "ci90_lo": lo, "ci90_hi": hi,
+                         "client_cores_b2": base["client_cores"],
+                         "client_cores_p1": cell["client_cores"],
+                         "verdict": "deficit" if hi < 0.98 else "advantage" if lo > 1.02 else "none"})
+    fa.write_csv(results / "sweep.csv", rows)
+    deficits = [r for r in rows if r["verdict"] == "deficit"]
+    advantages = [r for r in rows if r["verdict"] == "advantage"]
+    others = [r for r in rows if r["verdict"] == "none"]
+    m.add("AudSweepCells", len(rows))
+    m.add("AudSweepDeficits", len(deficits))
+    m.add("AudSweepAdvantages", len(advantages))
+    m.add("AudSweepDeficitMinCores", f"{min(r['client_cores_b2'] for r in deficits):.1f}")
+    m.add("AudSweepDeficitMinWorkers", min(r["concurrency"] for r in deficits))
+    m.add("AudSweepDeficitMaxSizeKiB", max(r["size"] for r in deficits) // 1024)
+    m.add("AudSweepDeficitOps", ", ".join(sorted({r["operation"].upper() for r in deficits})))
+    m.add("AudSweepAdvantageMaxWorkers", max(r["concurrency"] for r in advantages))
+    m.add("AudSweepAdvantageOps", ", ".join(sorted({r["operation"].upper() for r in advantages})))
+    m.add("AudSweepAdvantageHi", f"{max(r['ratio'] for r in advantages):.2f}")
+    m.add("AudSweepAdvantageLo", f"{min(r['ratio'] for r in advantages):.2f}")
+    # cells at least as busy as the least busy deficit cell that showed no deficit
+    busy = [r for r in others if r["client_cores_b2"] >= min(d["client_cores_b2"] for d in deficits)]
+    m.add("AudSweepBusyNoDeficit", len(busy))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", type=Path, default=Path("results/audit/runs.csv"))
@@ -297,6 +344,7 @@ def main() -> None:
         batch_m(runs, args.out, m)
     if args.native.is_file():
         batch_n(args.native, args.out, args.results, m)
+    sweep(args.results, m)
     (args.out / "audit.tex").write_text(
         HEADER.replace("revision_assets", "audit_assets") + "\n".join(m.lines) + "\n",
         encoding="utf-8")

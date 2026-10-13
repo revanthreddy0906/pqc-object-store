@@ -26,9 +26,20 @@ attached "CC Final 3.pdf". Revised files: `paper/main.tex`, `paper/supplement.te
    the native reader", and the exceptions are listed in a new "Open Anomalies" subsection.
 4. **The `\CITE` template in the prompt contains an em dash**, which the prompt also forbids. I
    used semicolons: `\CITE{authors; title; venue; year; VERIFY}`.
-5. **No new number was introduced.** A script compared every digit token of the revised source
-   with the baseline. The only new ones are the years inside `\CITE` placeholders and the set
-   k = 1, 2, 4, 8 that the prompt specifies for E2.
+5. **One set of derived counts is new, and you should decide whether to keep it.** To support
+   the word "only" in the thesis, the pipeline now sweeps all 102 closed-loop cells in which the
+   Python client ran both ML-KEM and X25519 and applies the deficit rule that was pre-registered
+   for the native reader (90 % interval below 0.98 or above 1.02). Result: 7 deficits, all
+   small-object GET with at least 128 workers and at least 14.2 of 16 client cores in use; 4
+   equally busy cells without a deficit; 2 advantages, both PUT at one worker. These are counts
+   over existing data, written by `analysis/audit_assets.py` to `results/audit/sweep.csv` and
+   into macros. They are not new experiments, but they are numbers that were not in the previous
+   manuscript, and applying that rule outside its own experiment is exploratory; the paper says
+   so. If you read the "no new number" constraint strictly, delete the "All cells" paragraph in
+   Sec. VII-D and anomaly A4, and weaken "only" in the thesis, abstract and conclusion to "in
+   the cells we report". Apart from this, a script found no digit token that is not in the
+   baseline, other than the years inside `\CITE` placeholders, the set k = 1, 2, 4, 8 from the
+   prompt, and the bounds 0.98 and 1.02 of the pre-registered rule.
 6. **Nothing was deleted from the pre-registration statements, deviations or limitations.** A
    script checked 46 distinctive phrases from those passages; all are present, some moved.
 
@@ -45,10 +56,10 @@ attached "CC Final 3.pdf". Revised files: `paper/main.tex`, `paper/supplement.te
 | T4 | Sec. I, contributions | C1 saturation-regime result with method; C2 binding artifact and library implication; C3 storage cost with the 2 KB S3 limit; C4 placeholder for E2. Sessions named a secondary result; client, harness and pipeline named an artifact | Originality framing |
 | Mo2 (T5) | Sec. III | Rewritten as six subsections that synthesize: where key establishment has been measured; per-message KEMs in messaging; storage and client-side encryption; standard constructions and KEM combiners; performance variability and benchmarking statistics; search. Eleven `\CITE` placeholders | Literature gaps |
 | Mo2 (T5) | Sec. III-F | Search statement keeps what was searched and lists IEEE Xplore, ACM DL, IACR ePrint and Google Scholar as *not yet searched*, with `\TODO` for queries and hit counts | A search that was not run cannot be claimed |
-| Mo1, Mi2 (T6) | Sec. IV-A, Table III | New paragraph: rollback to an older valid version is not prevented, and how that differs from the replay that is detected. New paragraph: AES-GCM is not key-committing, the single-recipient argument, and that it does not extend to several recipients | Threat-model gaps |
+| Mo1, Mi2 (T6) | Sec. IV-A, Table III | New paragraphs: writers are not authenticated, so integrity covers modification of an honest writer's object and not authenticity (this **weakens** the earlier threat-model wording, which implied more); rollback to an older valid version is not prevented, and how that differs from the replay that is detected; AES-GCM is not key-committing, the single-recipient argument, and why it does not extend to several recipients | Threat-model gaps |
 | Mi1 (T7) | Whole paper, Table V | Batch letters replaced by purpose labels; one mapping table. Labels requested: Primary-x86, Primary-ARM, Control-Manifest, Control-Binding, Native-GET, Sessions, Hybrid-Matrix. Labels I had to add because those batches had none: Expl-Sweep, Expl-Size, Expl-OpenLoop, Expl-SmallPUT, OneWorker-ARM, Open-Loop, Profiling, Power-PUT, Allocator | Readability |
 | Mi1 (T7) | Generated control table | Row labels changed in the generator (`analysis/audit_assets.py`), not by hand | Keep "every number generated" |
-| Mi1 (T7) | New Sec. VII-J "Open Anomalies" | A1 key-derivation difference, A2 native 16-core deficit, A3 X-Wing at 128 workers in the Python client, A4 allocator effect with its table | Collect anomalies. A3 was not in the prompt's list; it is an existing result that the new thesis makes relevant |
+| Mi1 (T7) | New Sec. VII-J "Open Anomalies" | A1 key-derivation difference; A2 native 16-core deficit; A3 X-Wing at 128 workers in the Python client; A4 ML-KEM faster at one worker in two exploratory cells; A5 allocator effect with its table | Collect anomalies. A3 and A4 were not in the prompt's list; they are existing results that the new thesis makes relevant |
 | Mi1 (T7) | Sec. VII-E, VII-F to IX-E | Caveats moved to Threats to Validity: controls not run on ARM; Power-PUT on x86 only; saturation criterion post hoc; CPU figures of the two clients not like for like. The qualifier stays on each claim ("on x86", "by construction", "exploratory") | Plain results, hedges in one place, no claim strengthened |
 | Mi1 (T7) | `paper/supplement.tex`, Sec. XI | Queueing appendix moved to a supplement that compiles on its own from the same generated macros; two-sentence summary and knee result in Discussion; pre-registered queueing protocol kept in the supplement and referenced from Methods | Structure |
 | C1, Mo4 (T8) | Back matter | Data and Code Availability with DOI slots; CRediT; Funding; Conflicts of Interest; Use of Generative AI, drafted factually with `\TODO`s | Missing statements |
@@ -62,50 +73,40 @@ Not changed: Sections II, V (except the em dashes), VIII, and every table and fi
 
 ## 2. Abstracts
 
-Counting convention: words are whitespace-separated tokens of the abstract with macros expanded;
-numbers are digit tokens, a range counts as two, and "X25519" and "S3" are not counted.
+Counting convention: words are whitespace-separated tokens with macros expanded and the percent
+sign attached to its number; numbers are digit tokens, a range counts as two, and "X25519", "S3"
+and "x86" are not counted. If the percent sign is counted as its own token, add 3 or 4 words.
+Sources are in `paper/abstracts/*.tex`, where every number is a pipeline macro.
 
-### Balanced (229 words, 5 numbers) — installed in `main.tex`
+### Balanced (222 words, 5 numbers), installed in `main.tex`
 
-> Data at rest that is encrypted under RSA or elliptic-curve keys can be recorded now and
-> decrypted once a large quantum computer exists; public-key envelope encryption must therefore
-> move to ML-KEM, which places a key-encapsulation operation and its ciphertext on every object.
-> The cost of that operation is known for isolated primitives and for connection setup, but not
-> on a concurrent object-store data path. We measured it on an S3-compatible store with a Python
-> client on two processor architectures and a native Go reader, comparing ML-KEM with X25519, RSA
-> and two hybrid modes in an exploratory campaign, a pre-registered confirmatory campaign with
-> paired equivalence tests, and pre-registered controls. With one unexplained exception in the
-> native reader, ML-KEM changed throughput only where the client was at or near CPU saturation:
-> there the Python client was 4.0 to 4.9 % slower than with X25519. Two controls on the first
-> architecture show that the deficit there is produced by the library binding, which makes four
-> foreign calls per decapsulation; with one call, ML-KEM was equivalent to X25519 within 2 %. A
-> native reader saturated on one core was 9.5 % slower, so the size of the cost belongs to the
-> implementation and not to the algorithm. The cost that every implementation pays is storage:
-> 1,056 more bytes of ciphertext per object than X25519. The results cover two clients, a
-> single-node store and one cloud provider.
+> Data at rest that is encrypted under classical public-key algorithms can be recorded now and decrypted once a large quantum computer exists; public-key envelope encryption must therefore move to ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. To our knowledge its cost has been measured for primitives and for connection setup, but not on a concurrent object-store data path. We measured it on an S3-compatible store with a Python client on two processor architectures and a native Go reader, comparing ML-KEM with X25519 and two hybrid modes in an exploratory campaign, a pre-registered confirmatory campaign with paired equivalence tests, and pre-registered controls. With one unexplained exception in the native reader, ML-KEM lowered throughput only where the client was at or near CPU saturation: there the Python client was 4.0 to 4.9% slower than with X25519. Two controls on the x86 client show that the deficit there is produced by the library binding, which makes four foreign calls per decapsulation; with one call, ML-KEM was equivalent to X25519 within 2%. A native reader saturated on one core was 9.5% slower, so the size of the cost depends on the implementation. The cost that every implementation pays is storage: 1,056 more bytes of ciphertext per object than X25519. The results cover two clients, a single-node store and one cloud provider.
 
-### Most technical (230 words, 6 numbers) — `paper/abstracts/technical.tex`
+### Most technical (227 words, 6 numbers)
 
-Adds the statement that the loss matched the extra client CPU per request, the 17 % share of the
-manifest control, and "about half" for the native reader's key recovery.
+> Data at rest that is encrypted under classical public-key algorithms can be recorded now and decrypted once a large quantum computer exists; public-key envelope encryption must move to ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. To our knowledge its cost has been measured for primitives and connection setup, but not on a concurrent object-store data path. We measured it on an S3-compatible store with a Python client on two architectures and a native Go reader, against X25519 and two hybrid modes, with pre-registered equivalence tests and controls. With one unexplained native exception, ML-KEM lowered throughput only at or near client CPU saturation, where the loss matched the extra client CPU per request: the Python client was 4.0 to 4.9% slower than with X25519. On the x86 client, a control with an equally large manifest attributes 17% of that deficit to ciphertext handling, and a control that reaches the same library through one foreign call, where the binding makes four, was equivalent to X25519 within 2%. A native reader saturated on one core was 9.5% slower, about half of which a slower key recovery in its library accounts for. The cost thus depends on the implementation; what every implementation pays is storage: 1,056 more bytes of ciphertext per object than X25519. The results cover two clients, one single-node store and one cloud provider.
 
-### Most practitioner-oriented (229 words, 5 numbers) — `paper/abstracts/practitioner.tex`
+### Most practitioner-oriented (228 words, 5 numbers)
 
-Frames the result as a procedure: the change is the ratio of client CPU per request, which an
-operator can measure beforehand, and must be measured on the actual client.
+> Data at rest that is encrypted under classical public-key algorithms can be recorded now and decrypted once a large quantum computer exists, so systems that encrypt objects to a public key must move to ML-KEM, which adds a key-encapsulation operation and its ciphertext to every object. To our knowledge that cost has been measured for primitives and connection setup, but not for a storage client under concurrent load. We measured it on an S3-compatible store with a Python client on two processor architectures and a native Go reader, comparing ML-KEM with X25519 and two hybrid modes in pre-registered paired equivalence tests. With one unexplained native exception, migration lowered throughput only where the client was at or near CPU saturation, and there by the ratio of client CPU per request, which an operator can measure beforehand. The Python client was 4.0 to 4.9% slower; controls on the x86 client trace the deficit there to a library binding that makes four foreign calls per decapsulation, and with one call ML-KEM was equivalent to X25519 within 2%. A native reader saturated on one core was 9.5% slower, so the cost depends on the implementation and must be measured on the actual client. The cost that no implementation avoids is storage: 1,056 more bytes of ciphertext per object than X25519. The results cover two clients, a single-node store and one cloud provider.
 
 ### Recommendation: the balanced version
 
-- It follows the seven-part structure most directly and carries the whole argument with five
-  numbers.
-- The technical version is the most complete, but its sixth number (17 %) and the CPU-ratio
-  clause make the middle of the paragraph dense, and it sits at the upper word limit.
-- The practitioner version reads best for an operator, but it leads with the method, and a
-  reviewer may read "by the ratio of client CPU per request" as presenting an identity as a
-  result, which T1 asks to avoid.
+- It follows the seven-part structure most directly and carries the argument with five numbers.
+- The technical version is the most complete, but its sixth number (17 %) and the CPU clause make
+  the middle dense, and it sits near the upper word limit.
+- The practitioner version reads best for an operator, but "by the ratio of client CPU per
+  request" may be read as presenting an accounting identity as a result, which T1 asks to avoid.
 
-Two things to know about all three: "RSA" and "Go" are kept as names, not expanded; and the
-controls are described as run "on the first architecture" because they ran on x86 only.
+Choices to know about in all three:
+
+- The gap sentence is hedged with "to our knowledge", because four database searches are still
+  outstanding.
+- "RSA" is not named; "classical public-key algorithms" stands in, to respect the abbreviation
+  rule. "Go" and "x86" are kept as names. The controls are stated as run "on the x86 client"
+  because they did not run on ARM.
+- The verb is "lowered", not "changed": by the rule now stated in Sec. VI-G, ML-KEM was faster
+  than X25519 in two one-worker cells of the exploratory campaign (anomaly A4).
 
 ## 3. Claims ledger
 
@@ -114,15 +115,15 @@ controls are described as run "on the first architecture" because they ran on x8
 | # | Claim | Support |
 |---|---|---|
 | 1 | Data under RSA or elliptic-curve keys is exposed to record-now, decrypt-later; public-key envelope encryption puts a KEM operation and ciphertext on every object | Background, Sec. I and II; ref. FIPS 203. Motivation, not a result |
-| 2 | Cost known for primitives and connection setup, not for a concurrent object-store path | Sec. III, Table I; search statement. **Partly unsupported until the four database searches are run** (Sec. III-F `\TODO`s) |
+| 2 | To our knowledge, cost measured for primitives and connection setup, not for a concurrent object-store path | Sec. III, Table I; search statement. Hedged because four database searches are outstanding (Sec. III-F `\TODO`s) |
 | 3 | Setup: Python client on two architectures, native Go reader, modes, exploratory and pre-registered confirmatory campaign, pre-registered controls | Sec. VI-A, Table V |
-| 4 | With one unexplained exception in the native reader, ML-KEM changed throughput only at or near client CPU saturation | Table XI (`tab:tost`), Table XIV (`tab:model`), Table XVII (`tab:native`); exception: `\AudNMidMlkemDeficit`, anomaly A2. The Python criterion is post hoc (Sec. VI-G, IX-E) |
+| 4 | With one unexplained exception in the native reader, ML-KEM lowered throughput only at or near client CPU saturation | Sweep of all cells: `\AudSweepCells`, `\AudSweepDeficits`, `\AudSweepDeficitMinCores`, `\AudSweepBusyNoDeficit` (Sec. VII-D, `results/audit/sweep.csv`); Table XVII for the native reader; exception: `\AudNMidMlkemDeficit`, anomaly A2. Exploratory rule; "near" has no pre-registered threshold |
 | 5 | Python client 4.0 to 4.9 % slower there | `\RevHotDeficit`, `\ArmHotDeficit`; Table XI |
 | 6 | Two controls on the first architecture show the deficit there is produced by the binding | `\AudBindVerdict`, `\AudPadVerdict`; Table XVI (`tab:control`). x86 only |
 | 7 | The binding makes four foreign calls per decapsulation | Library source, described in Sec. VII-E; recorded in the pre-registration (SoT v1.12). Not a measured quantity |
 | 8 | With one call, ML-KEM was equivalent to X25519 within 2 % | `\AudBindReleasedEqTwoPct`, `\AudBindReleasedRatio`, `\AudBindReleasedCI` |
 | 9 | Native reader saturated on one core 9.5 % slower | `\AudNOneMlkemDeficit`, `\AudNOneMlkemThrCI`, `\AudNOneSaturated`; Table XVII |
-| 10 | The size of the cost belongs to the implementation, not the algorithm | Claims 5, 8 and 9 together: same algorithm, three clients, three sizes. An inference from three points, not a general law |
+| 10 | The size of the cost depends on the implementation | Claims 5, 8 and 9 together: same algorithm, three clients, three sizes. Shows dependence on the implementation; does not show the algorithm contributes nothing |
 | 11 | Storage: 1,056 more bytes of ciphertext per object than X25519 | `\RevMetaIntrinsic`; Sec. VII-I |
 | 12 | Scope: two clients, single-node store, one cloud provider | Sec. VI-B, IX-E |
 
@@ -131,7 +132,7 @@ controls are described as run "on the first architecture" because they ran on x8
 | # | Claim | Support |
 |---|---|---|
 | 1 | Configurations evaluated | Sec. VI |
-| 2 | ML-KEM changed throughput against X25519 only at or near saturation, one unexplained exception | As abstract claim 4 |
+| 2 | ML-KEM lowered throughput against X25519 only at or near saturation, one unexplained exception | As abstract claim 4 |
 | 3 | Saturated cell: 4.0 % (x86), 4.9 % (ARM) | `\RevHotDeficit`, `\ArmHotDeficit` |
 | 4 | Controls on x86 attribute the deficit to the binding and 17 % to the manifest | `\AudBindVerdict`, `\AudPadShare`, `\AudPadShareLo`–`Hi` |
 | 5 | One call: equivalent within ±2 % | `\AudBindReleasedEqTwoPct` |
@@ -139,7 +140,7 @@ controls are described as run "on the first architecture" because they ran on x8
 | 7 | Key recovery: about half (ML-KEM), about three quarters (X-Wing) of the extra CPU | `\AudNMicroMlkemExtra` of `\AudNOneMlkemCpuDelta`; `\AudNMicroXwingExtra` of `\AudNOneXwingCpuDelta`. From an exploratory timing |
 | 8 | In the saturated cells the loss matched the extra client CPU per request | Table XIV (`\RevModelErrHot`); native by construction. An identity on the same runs; the one advance prediction missed (`\AudPredictionErrorJ`, `\AudPredictionErrorL`) |
 | 9 | CPU per request is the quantity to measure before a migration | Follows from 8 as a method. Not validated on an unseen configuration |
-| 10 | The size of the cost belongs to the client implementation | As abstract claim 10 |
+| 10 | The size of the cost depends on the client implementation | As abstract claim 10 |
 | 11 | Storage: 1,056 bytes more per object | `\RevMetaIntrinsic` |
 | 12 | Limits of scope | Sec. IX-E, IX-F, X |
 

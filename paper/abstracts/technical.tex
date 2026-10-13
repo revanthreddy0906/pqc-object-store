@@ -1,15 +1,15 @@
-Data at rest that is encrypted under RSA or elliptic-curve keys can be recorded now and
+Data at rest that is encrypted under classical public-key algorithms can be recorded now and
 decrypted once a large quantum computer exists; public-key envelope encryption must move to
-ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. It
-is known for primitives and for connection setup, but not on a concurrent object-store data
-path. We measured it on an S3-compatible store with a Python client on two
-architectures and a native Go reader, against X25519, RSA and two hybrid modes, using pre-registered paired equivalence tests and controls. With one unexplained exception in the native reader, ML-KEM changed throughput only at or
+ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. To our knowledge its cost
+has been measured for primitives and connection setup, but not on a concurrent object-store
+data path. We measured it on an S3-compatible store with a Python client on two
+architectures and a native Go reader, against X25519 and two hybrid modes, with pre-registered equivalence tests and controls. With one unexplained native exception, ML-KEM lowered throughput only at or
 near client CPU saturation, where the loss matched the extra client CPU per request: the Python client was
-\RevHotDeficit{} to \ArmHotDeficit\,\% slower than with X25519. On the first architecture, a control
+\RevHotDeficit{} to \ArmHotDeficit\,\% slower than with X25519. On the x86 client, a control
 with an equally large manifest attributes \AudPadShare\,\% of that deficit to ciphertext
 handling, and a control that reaches the same library through one foreign call, where the
 binding makes four, was equivalent to X25519 within 2\,\%. A native reader saturated on one core
 was \AudNOneMlkemDeficit\,\% slower, about half of which a slower key recovery in its library
-accounts for. The cost is a property of the implementation; what every implementation pays is storage:
+accounts for. The cost thus depends on the implementation; what every implementation pays is storage:
 \RevMetaIntrinsic{} more bytes of ciphertext per object than X25519. The results cover two
 clients, one single-node store and one cloud provider.

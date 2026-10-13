@@ -48,20 +48,18 @@ Hyderabad, India\\
 \maketitle
 
 \begin{abstract}
-Data at rest that is encrypted under RSA or elliptic-curve keys can be recorded now and
+Data at rest that is encrypted under classical public-key algorithms can be recorded now and
 decrypted once a large quantum computer exists; public-key envelope encryption must therefore move to
-ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. The cost
-of that operation is known for isolated primitives and for connection setup, but not on a
-concurrent object-store data path. We measured it on an S3-compatible store with a Python client
-on two processor architectures and a native Go reader, comparing ML-KEM with X25519, RSA and two
+ML-KEM, which places a key-encapsulation operation and its ciphertext on every object. To our knowledge its cost has been measured for primitives and for connection setup, but not on
+a concurrent object-store data path. We measured it on an S3-compatible store with a Python client
+on two processor architectures and a native Go reader, comparing ML-KEM with X25519 and two
 hybrid modes in an exploratory campaign, a pre-registered confirmatory campaign with paired
-equivalence tests, and pre-registered controls. With one unexplained exception in the native reader, ML-KEM changed throughput only where
+equivalence tests, and pre-registered controls. With one unexplained exception in the native reader, ML-KEM lowered throughput only where
 the client was at or near CPU saturation: there the Python client was \RevHotDeficit{} to
-\ArmHotDeficit\,\% slower than with X25519. Two controls on the first architecture show that the
+\ArmHotDeficit\,\% slower than with X25519. Two controls on the x86 client show that the
 deficit there is produced by the library binding, which makes four foreign calls per decapsulation;
 with one call, ML-KEM was equivalent to X25519 within 2\,\%. A native reader saturated on one
-core was \AudNOneMlkemDeficit\,\% slower, so the size of the cost belongs to the implementation
-and not to the algorithm. The cost that every implementation pays is storage: \RevMetaIntrinsic{} more bytes of
+core was \AudNOneMlkemDeficit\,\% slower, so the size of the cost depends on the implementation. The cost that every implementation pays is storage: \RevMetaIntrinsic{} more bytes of
 ciphertext per object than X25519. The results cover two clients, a single-node store
 and one cloud provider.
 \end{abstract}
@@ -110,15 +108,15 @@ invisible. What that estimate cannot say is whether it holds under concurrency, 
 it fails, by how much, and whether the cause is the KEM computation or the larger ciphertext it
 carries through the data path (Section~\ref{sec:related}, Table~\ref{tab:gap}).
 
-\textbf{Thesis.} In the configurations we measured, replacing X25519 by per-object ML-KEM changed
-throughput only where the client was at or near CPU saturation. The size of the change there was
-a property of the client implementation and not of the algorithm: it ranged from no measurable
+\textbf{Thesis.} In the configurations we measured, replacing X25519 by per-object ML-KEM lowered
+throughput only where the client was at or near CPU saturation, with one unexplained exception
+in the native reader. The size of the loss there depended on the client implementation: it
+ranged from no measurable
 loss (\AudBindReleasedRatio{} of X25519's throughput, the Python client calling liboqs through
 one foreign call) through \RevHotDeficit--\ArmHotDeficit\,\% (the same client through the
 standard binding) to \AudNOneMlkemDeficit\,\% (a native Go reader on one core). The cost that
-every implementation pays is storage: a larger ciphertext with every object. Two results fall
-outside a strictly saturated regime and are not explained
-(Section~\ref{sec:anomalies}).
+every implementation pays is storage: a larger ciphertext with every object. The observations
+that do not fit this picture are collected in Section~\ref{sec:anomalies}.
 
 \textbf{Contributions.}
 \begin{itemize}
@@ -141,8 +139,11 @@ hybrids, separated into ciphertext and encoding, scaled to fleet sizes, and set 
 \item[\textbf{C4}] \TODO{E2: multi-recipient objects. Not yet run; see
 Section~\ref{sec:planned}. Remove this item if E2 is not carried out.}
 \end{itemize}
-A secondary result is the measured trade-off of bounded session amortization
-(Section~\ref{sec:tradeoff}). The instrumented client, the harness, the native reader and the
+Secondary results are the measured trade-off of bounded session amortization, which saves a few
+percent of client CPU and changes throughput only on a client-bound workload
+(Section~\ref{sec:tradeoff}); the attribution of the store's small-object write ceiling to its
+metadata path and not to its disk (Section~\ref{sec:bottleneck}); and the observation that
+RSA-4096 is the one mode that moves the bottleneck in the Python client. The instrumented client, the harness, the native reader and the
 analysis pipeline are an artifact that supports these results and are not claimed as a
 contribution; neither is the architecture or commit protocol, which is not a new cryptographic
 construction (Table~\ref{tab:claims}). The open-loop capacity observations in the supplementary
@@ -237,7 +238,7 @@ paper~\cite{bos2018}, the standard~\cite{fips203}, library benchmarks~\cite{libo
 comparative preprints~\cite{rodriguez2025,demir2025,lopez2025} give the cost and sizes of the
 three KEM operations on several processor families; they establish that platform and
 implementation matter, which is why we repeat our primary comparison on a second architecture
-and a second implementation, but they contain no storage, concurrency or end-to-end request
+and test a second implementation, but they contain no storage, concurrency or end-to-end request
 latency. At the transport level, studies of post-quantum TLS and KEMTLS
 \cite{paquin2020,sikeridis2020,sosnowski2023,giron2023,schwabe2020} measure connection
 establishment under latency, loss and bandwidth limits and decompose the handshake. They are the
@@ -322,6 +323,13 @@ ciphertexts and manifests. The adversary does not hold the recipient's decapsula
 in the future operate a quantum computer. Availability, traffic analysis, deletion of whole
 objects, compromised endpoints and side channels in the client are out of scope.
 
+\textbf{Writers are not authenticated.} The envelope encrypts to a public key and carries no
+signature, as HPKE base mode does not either. Integrity therefore means that an object written
+by an honest writer cannot be modified, reordered, truncated, extended or spliced without
+detection. It does not mean that an object is authentic: anyone who knows the recipient's public
+key, including the store, can create a new object under any identity, and it will decrypt
+without error. Sender authentication is out of scope.
+
 \textbf{Rollback is not prevented.} Replay is detected only where it crosses an identity: a
 manifest or chunk moved to another object or another version fails authentication, because the
 object identity and version are bound into the key and into every chunk. Serving an
@@ -334,12 +342,14 @@ signed version counter or a transparency log; it is out of scope.
 decrypts validly under more than one key
 \CITE{Dodis, Grubbs, Ristenpart, Woodage; Fast Message Franking: From Invisible Salamanders to Encryptment; CRYPTO; 2018; VERIFY}
 \CITE{Len, Grubbs, Ristenpart; Partitioning Oracle Attacks; USENIX Security; 2021; VERIFY}.
-We accept this for the single-recipient setting studied here, on the argument that the attacks
-need an adversary who chooses or influences the keys, whereas each object key is derived from a
-KEM secret known only to the honest sender and the one recipient and is bound to the object
-context. That argument is not a proof and we make no formal claim (Table~\ref{tab:claims}). It
-does not extend to several recipients or to password-derived keys: a multi-recipient design
-(Section~\ref{sec:planned}, E2) must use a key-committing construction
+We accept this for the single-recipient setting studied here, on the following argument. Since
+writers are not authenticated, a malicious writer can already store any plaintext it likes
+under a key the recipient will derive; a ciphertext that also decrypts under a second key gives
+it no further capability against one recipient. That argument is not a proof and we make no
+formal claim (Table~\ref{tab:claims}). It does not extend to several recipients, where one
+ciphertext could decrypt to different plaintexts for different recipients, or to
+password-derived keys: a multi-recipient design (Section~\ref{sec:planned}, E2) must use a
+key-committing construction
 \CITE{Albertini et al.; How to Abuse and Fix Authenticated Encryption Without Key Commitment; USENIX Security; 2022; VERIFY}.
 
 \subsection{Key-Establishment Modes}
@@ -481,7 +491,7 @@ Hybrid construction & P3 implements X-Wing and passes the draft's test vectors, 
 Envelope & The structure of HPKE base mode (KEM, context-bound key derivation, AEAD) & HPKE conformance, or any analysis of HPKE carrying over to this format \\
 Engineering properties & Identity and version binding, authenticated chunk order and final-chunk flag, commit-last visibility, mode-downgrade rejection and session bounds, each exercised by tamper and stress tests & A formal model or proof of the storage protocol; resistance to side channels \\
 Experimental findings & Measured latency, throughput, CPU, memory, metadata and queueing behaviour of the evaluated configuration & Performance on other S3 implementations, distributed deployments, native clients, other regions or hardware \\
-Out of scope & -- & Availability, traffic analysis, compromised endpoints, deletion, rollback to an older valid version, key commitment of the AEAD, and transport security (held constant) \\
+Out of scope & -- & Availability, traffic analysis, compromised endpoints, deletion, sender authentication, rollback to an older valid version, key commitment of the AEAD, and transport security (held constant) \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -836,12 +846,18 @@ check whether the client is saturated, and read off the expected change.
 
 \textbf{Saturation criterion.} For the native reader the criterion was fixed in advance: a cell
 is client-saturated if process CPU is at least 0.95 of the cores made available, in every mode.
-For the Python client no such criterion was pre-registered. We describe the 500-worker cell as
-saturated because there the post-quantum modes and X25519 use the same number of cores to
-within 0.1 of a core, and the 128-worker cell as not saturated because there the costlier modes
-use visibly more cores than X25519 (Table~\ref{tab:model}). RSA-4096 uses more cores than
-X25519 in both cells. The distinction rests on a small difference in cores and was drawn after
-the data; Section~\ref{sec:validity} treats it as a threat.
+For the Python client no criterion was pre-registered, and we do not claim a sharp one. In the
+64\,KiB GET cells the post-quantum modes use nearly the same number of cores as X25519 at 500
+workers and visibly more at 128 workers (Table~\ref{tab:model}); RSA-4096 uses more cores than
+X25519 in both. We therefore write ``at or near saturation'' and describe the regime by what
+was observed (next paragraph), not by a threshold.
+
+\textbf{What counts as a throughput deficit.} To say where ML-KEM lowered throughput we apply
+one rule to every closed-loop cell in which the Python client ran both ML-KEM and X25519: a
+\emph{deficit} if the 90\,\% interval of the paired throughput ratio lies below 0.98, an
+\emph{advantage} if it lies above 1.02. This is the rule pre-registered for the native reader;
+applying it to the other experiments was decided afterwards and is exploratory
+(Section~\ref{sec:deviations}).
 
 \textbf{Status as a prediction.} The identity becomes a prediction only when applied to data it
 was not computed from. We did that once, with a ratio fixed before two follow-up experiments;
@@ -862,7 +878,8 @@ testbed of the follow-up experiments did not complete; its network baseline did.
 training and held-out split. It did not fix the following, which were chosen during analysis and
 are exploratory: applying Holm's correction to the ARM family as well; client CPU per request as a
 second endpoint; the CPU accounting of Section~\ref{sec:cpumethod}, the saturation criterion for
-the Python client and the stage comparison of Section~\ref{sec:mechanism};
+the Python client, the sweep of all cells with the deficit rule and the stage comparison of
+Section~\ref{sec:mechanism};
 the single-thread timing of the native reader's key recovery;
 the bootstrap check; the definition of the knee as twice the light-load response time; the
 functional form of the load-dependent model; the order-and-time regression of
@@ -971,6 +988,16 @@ equivalent to X25519 in \RevPrimaryEq{} of the 8 cells after Holm correction and
 in \RevPrimaryInc; no cell is non-equivalent. The ARM replication also yields \ArmPrimaryEq{}
 equivalent and \ArmPrimaryInc{} inconclusive cells, though not the same ones. The informative
 cell is the saturated one, 64\,KiB GET at 500 workers.
+
+\emph{All cells.} Applying the deficit rule of Section~\ref{sec:cpumethod} to all
+\AudSweepCells{} closed-loop cells in which the Python client ran both modes, across every
+campaign, ML-KEM shows a deficit in \AudSweepDeficits. All of them are
+\AudSweepDeficitOps{} of objects of at most \AudSweepDeficitMaxSizeKiB\,KiB with at least
+\AudSweepDeficitMinWorkers{} workers, and in all of them the client used at least
+\AudSweepDeficitMinCores{} of its 16 cores. Cores in use mark the regime without separating it
+sharply: \AudSweepBusyNoDeficit{} other cells were at least that busy and showed no deficit.
+ML-KEM shows an advantage in \AudSweepAdvantages{} cells, both \AudSweepAdvantageOps{} at one
+worker in the exploratory campaign (Section~\ref{sec:anomalies}).
 
 \emph{Large objects.} All four cells at 1\,MiB and 16\,MiB are equivalent on both architectures,
 with ratios between \RevLargeRatioLo{} and \RevLargeRatioHi{} on x86 and between
@@ -1318,7 +1345,7 @@ kilobyte-sized ones, and \RevMetaIntrinsicBillionTB--\RevMetaBillionTB\,TB per b
 before redundancy.}
 
 \subsection{Open Anomalies}\label{sec:anomalies}
-Four observations are not explained by anything above. We list them together so that they are
+Five observations are not explained by anything above. We list them together so that they are
 not read past.
 
 \textbf{(A1) A slower key derivation with ML-KEM.} At one worker the key-derivation stage is
@@ -1333,14 +1360,23 @@ X25519, in a cell that does not meet the pre-registered saturation criterion
 (\AudNMidCores{} cores in use). Two cautions apply: the 16 virtual CPUs are 8 physical cores, and
 the reader's CPU per request is two to three times higher with 16 cores than with one, which
 suggests runtime overhead that makes ``cores in use'' a soft measure of saturation here. This
-result contradicts a strict reading of ``no cost without saturation''.
+result is the one exception to the statement that ML-KEM lowered throughput only at or near
+client saturation.
 
 \textbf{(A3) X-Wing below X25519 in a Python cell we call unsaturated.} At 64\,KiB GET with 128
 workers X-Wing is \RevXwingMidDeficit\,\% (x86) and \ArmXwingMidDeficit\,\% (ARM) slower than
 X25519 (Table~\ref{tab:secondary}), although by our criterion that cell is not saturated. The
 client is the busiest resource there, so this may be near-saturation; we did not test it.
 
-\textbf{(A4) An allocator effect at 1\,MiB.} In \lab{Hybrid-Matrix}, at 1\,MiB PUT with one worker X-Wing is
+\textbf{(A4) ML-KEM faster than X25519 at one worker.} By the deficit rule, ML-KEM has an
+advantage in \AudSweepAdvantages{} cells of the exploratory campaign, both PUT at one worker
+(ratios \AudSweepAdvantageLo{} and \AudSweepAdvantageHi, five runs each). Key establishment is
+far too small a share of those requests to produce a difference of that size, and the
+corresponding cells of \lab{Hybrid-Matrix} do not show an advantage by the same rule. We have
+no explanation; an allocator effect of the kind described next is a candidate that we did not
+test.
+
+\textbf{(A5) An allocator effect at 1\,MiB.} In \lab{Hybrid-Matrix}, at 1\,MiB PUT with one worker X-Wing is
 \RevMidPutXwingDeficit\,\% and P2 \RevMidPutStudyHybridDeficit\,\% slower than X25519 although key
 establishment is \RevKeShareXwingMidPut\,\% of the request; the difference sits in the AES-GCM
 stage timer, which all modes share. A diagnostic pair of experiments (\lab{Allocator}, \AudAllocRuns{} runs,
@@ -1601,7 +1637,7 @@ the symmetric-only mode and for ML-KEM.
 \section{Conclusion}\label{sec:conclusion}
 We evaluated per-object post-quantum key establishment on an S3-compatible store with a Python
 client on x86 and ARM and with a native Go reader, against a single-node MinIO server on AWS. In
-these configurations ML-KEM changed throughput against X25519 only where the client was at or
+these configurations ML-KEM lowered throughput against X25519 only where the client was at or
 near CPU saturation, with one unexplained exception in the native reader
 (Section~\ref{sec:anomalies}). In the one saturated cell of the pre-registered family the
 Python client was \RevHotDeficit\,\% (x86) and \ArmHotDeficit\,\% (ARM) slower; two
@@ -1612,7 +1648,7 @@ equivalent to X25519 within $\pm$2\,\%. A native reader saturated on one core wa
 key recovery in its library accounts for about half of the extra CPU for ML-KEM and about three
 quarters for X-Wing. In the saturated cells the throughput loss matched the extra client CPU per
 request, which makes CPU per request the quantity to measure before a migration. The size of
-the cost belongs to the client implementation. The cost that every implementation pays is
+the cost depends on the client implementation. The cost that every implementation pays is
 storage: \RevMetaIntrinsic{} bytes more per object than X25519.
 
 These results describe two clients, one single-node store and one cloud provider, and the
