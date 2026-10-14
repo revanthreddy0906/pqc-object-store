@@ -18,27 +18,29 @@ def R(a, b):
 
 
 ABSTRACT = r"""\begin{abstract}
-Data encrypted today under classical public-key algorithms can be decrypted once a large quantum
-computer exists, so client-side envelope encryption for object storage must move to a
-post-quantum key-encapsulation mechanism such as ML-KEM wherever writer and reader share no
-secret key. Every object then carries its own encapsulation and a 1{,}088-byte ciphertext.
-Existing work does not show what this costs: primitive benchmarks time the KEM in isolation,
-post-quantum TLS studies measure it once per connection, and storage studies omit post-quantum
-key establishment. To our knowledge, none measures a KEM per object on a concurrent object-store
-data path or separates the cost of the KEM computation from that of its larger ciphertext. We
-measured it on an S3-compatible store with a Python client on x86 and ARM and a native Go
-reader, comparing ML-KEM-768 with X25519, RSA-4096, a symmetric baseline and two hybrids at 1 to
-500 concurrent workers, in an exploratory campaign, a pre-registered confirmatory campaign with
-paired equivalence tests, and pre-registered controls for manifest size and library binding. In
-these configurations, ML-KEM lowered throughput only where the client was at or near CPU
-saturation, with one unexplained exception in the native reader. In the saturated
-pre-registered cell the Python client was \RevHotDeficit\,\% (x86) and \ArmHotDeficit\,\% (ARM)
-slower than with X25519. On x86 the controls attribute this mainly to the library binding, which
-makes four foreign calls per decapsulation, and \AudPadShare\,\% to the larger manifest; with
-one call, ML-KEM was equivalent to X25519 within $\pm$2\,\%. A native reader saturated on one
-core was \AudNOneMlkemDeficit\,\% slower, so the cost depends on the implementation. Every
-implementation pays in storage: \RevMetaIntrinsic{} more bytes of ciphertext per object than
-X25519. The results cover two clients, a single-node store and one cloud provider.
+Data encrypted today under classical public-key algorithms can be decrypted
+once a large quantum computer exists. Because object stores keep data for years, client-side
+envelope encryption must move to a post-quantum key-encapsulation mechanism such as ML-KEM
+wherever writer and reader share no secret key, which places an encapsulation and a
+1{,}088-byte ciphertext on every object. Its cost, however, has so far been
+measured only for the primitives in isolation and for connection setup in post-quantum TLS,
+while storage studies have left post-quantum key establishment out. To our knowledge, no study
+has measured a KEM per object on a concurrent object-store data path, or asked whether a cost
+there comes from the KEM computation or from its larger ciphertext. Here, we measure it on an
+S3-compatible store with a Python client on x86 and ARM and a native Go reader, comparing
+ML-KEM-768 with X25519 and with RSA, symmetric and hybrid baselines at 1 to 500 concurrent
+workers, in an exploratory and a pre-registered campaign with paired equivalence tests and
+pre-registered controls. In these configurations, ML-KEM lowered
+throughput only where the client was at or near CPU saturation, with one unexplained exception
+in the native reader. In the saturated cell of the pre-registered family, the Python client was
+\RevHotDeficit\,\% (x86) and \ArmHotDeficit\,\% (ARM) slower than with X25519. Controls on x86
+then traced this deficit mainly to the library binding, which makes four foreign calls per
+decapsulation, and \AudPadShare\,\% of it to the larger manifest; with one call, ML-KEM was
+equivalent to X25519 within $\pm$2\,\%. A native reader saturated on one core was
+\AudNOneMlkemDeficit\,\% slower, showing that the size of the cost depends on the
+implementation. The one cost every implementation pays is storage: \RevMetaIntrinsic{} more
+bytes of ciphertext per object than X25519. These results, from two clients, a single-node store
+and one cloud provider, make client CPU per request the quantity to measure before migrating.
 \end{abstract}"""
 
 MEASURES = (
