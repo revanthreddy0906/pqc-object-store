@@ -25,7 +25,7 @@ step and a larger ciphertext to every stored object. So far, the cost of ML-KEM 
 measured for the algorithm on its own and for securing network connections, but not for
 encrypting each object in a storage system that serves many clients at once. It has therefore
 been unclear whether ML-KEM slows such a system, under which conditions, and why. We address
-this gap by measuring per-object ML-KEM against classical key exchange on an S3-compatible
+this problem by measuring per-object ML-KEM against classical key exchange on an S3-compatible
 object store, with two client implementations, two processor types and up to 500 concurrent
 workers, using pre-registered experiments and statistical equivalence tests. ML-KEM reduced
 throughput only when the client's processor was at or near full load, with one unexplained
@@ -135,6 +135,17 @@ PIECES = [
 
 # (old, new): every textual change apart from the moves. Each `old` must occur exactly once.
 SUBS = [
+    # ---- author list and order as given by the authors
+    ("\\cbitauthor{Revanth Reddy Lingala}{revanth252017@gmail.com}\\hfill\n"
+     "\\cbitauthor{Vainavi Venkat}{vainu24@gmail.com}\\hfill\n"
+     "\\cbitauthor{Saarthak Manocha}{saarthakmanocha@gmail.com}\\\\[10pt]\n"
+     "\\hspace*{\\fill}\\cbitauthor{Padigela Srujan}{padigela.srujan2007@gmail.com}\\hspace{0.05\\textwidth}%\n"
+     "\\cbitauthor{K. Gangadhara Rao}{kgangadhar\\_it@cbit.ac.in}\\hspace*{\\fill}}",
+     "\\cbitauthor{Revanth Reddy Lingala}{revanthreddy0906@gmail.com}\\hfill\n"
+     "\\cbitauthor{K. Gangadhara Rao}{kgangadhar\\_it@cbit.ac.in}\\hfill\n"
+     "\\cbitauthor{Padigela Srujan}{padigela.srujan2007@gmail.com}\\\\[10pt]\n"
+     "\\hspace*{\\fill}\\cbitauthor{Saarthak Manocha}{saarthakmanocha@gmail.com}\\hspace{0.05\\textwidth}%\n"
+     "\\cbitauthor{Vainavi Venkat}{vainavivenkat06@gmail.com}\\hspace*{\\fill}}"),
     # ---- Task 2: run-in headings in the Introduction
     ("\\textbf{When a public-key KEM per object is needed.} If writer",
      "A public-key KEM per object is needed only in some deployments. If writer"),
