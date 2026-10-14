@@ -44,29 +44,23 @@ Hyderabad, India\\
 \maketitle
 
 \begin{abstract}
-Data encrypted today under classical public-key algorithms can be decrypted
-once a large quantum computer exists. Because object stores keep data for years, client-side
-envelope encryption must move to a post-quantum key-encapsulation mechanism such as ML-KEM
-wherever writer and reader share no secret key, which places an encapsulation and a
-1{,}088-byte ciphertext on every object. Its cost, however, has so far been
-measured only for the primitives in isolation and for connection setup in post-quantum TLS,
-while storage studies have left post-quantum key establishment out. To our knowledge, no study
-has measured a KEM per object on a concurrent object-store data path, or asked whether a cost
-there comes from the KEM computation or from its larger ciphertext. Here, we measure it on an
-S3-compatible store with a Python client on x86 and ARM and a native Go reader, comparing
-ML-KEM-768 with X25519 and with RSA, symmetric and hybrid baselines at 1 to 500 concurrent
-workers, in an exploratory and a pre-registered campaign with paired equivalence tests and
-pre-registered controls. In these configurations, ML-KEM lowered
-throughput only where the client was at or near CPU saturation, with one unexplained exception
-in the native reader. In the saturated cell of the pre-registered family, the Python client was
-\RevHotDeficit\,\% (x86) and \ArmHotDeficit\,\% (ARM) slower than with X25519. Controls on x86
-then traced this deficit mainly to the library binding, which makes four foreign calls per
-decapsulation, and \AudPadShare\,\% of it to the larger manifest; with one call, ML-KEM was
-equivalent to X25519 within $\pm$2\,\%. A native reader saturated on one core was
-\AudNOneMlkemDeficit\,\% slower, showing that the size of the cost depends on the
-implementation. The one cost every implementation pays is storage: \RevMetaIntrinsic{} more
-bytes of ciphertext per object than X25519. These results, from two clients, a single-node store
-and one cloud provider, make client CPU per request the quantity to measure before migrating.
+Data encrypted today with classical public-key algorithms could be decrypted once large quantum
+computers exist. Cloud object stores keep data for years, so the client-side encryption that
+protects it must move to post-quantum algorithms such as ML-KEM, which adds a key-encapsulation
+step and a larger ciphertext to every stored object. So far, the cost of ML-KEM has been
+measured for the algorithm on its own and for securing network connections, but not for
+encrypting each object in a storage system that serves many clients at once. It has therefore
+been unclear whether ML-KEM slows such a system, under which conditions, and why. We address
+this gap by measuring per-object ML-KEM against classical key exchange on an S3-compatible
+object store, with two client implementations, two processor types and up to 500 concurrent
+workers, using pre-registered experiments and statistical equivalence tests. ML-KEM reduced
+throughput only when the client's processor was at or near full load, with one unexplained
+exception, and then by \RevHotDeficit{} to \ArmHotDeficit\,\% in our main client. Controlled
+experiments on one processor type traced most of that loss to the way the software library was
+called, and a second, native client showed that the size of the loss depends on the
+implementation. The lasting cost is storage: \RevMetaIntrinsic{} more bytes per object than with
+classical key exchange. The
+results cover two clients, one single-node store and one cloud provider.
 \end{abstract}
 
 \begin{IEEEkeywords}
