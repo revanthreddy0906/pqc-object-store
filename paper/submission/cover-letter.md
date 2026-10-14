@@ -24,7 +24,7 @@ Our manuscript addresses this problem. We measured per-object ML-KEM-768 against
 
 We believe the work suits *Computers & Security* because it gives security engineers and storage operators planning a post-quantum migration a measured basis for that decision, together with a simple procedure (comparing client CPU per request under saturation) that they can apply to their own systems. The paper states its limits openly: it covers two clients, a single-node store and one cloud provider, and it lists the observations that remain unexplained.
 
-We confirm that this manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the manuscript and agree with its submission to *Computers & Security*. The declarations of competing interests, funding and the use of generative AI are included in the manuscript. Supplementary material describing the open-loop capacity of the store is provided as a separate file.
+We confirm that this manuscript is original, has not been published previously, and is not under consideration for publication elsewhere. All authors have read and approved the manuscript and agree with its submission to *Computers & Security*. The declarations of competing interests, funding and the use of generative AI are included in the manuscript. Supplementary material describing the open-loop capacity of the store is provided as a separate file. The code, configurations, pre-registration records and per-run results are publicly available at https://github.com/revanthreddy0906/pqc-object-store.
 
 Thank you for considering our submission. We look forward to hearing from you.
 

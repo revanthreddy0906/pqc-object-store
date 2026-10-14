@@ -135,6 +135,17 @@ PIECES = [
 
 # (old, new): every textual change apart from the moves. Each `old` must occur exactly once.
 SUBS = [
+    # ---- repository made public at submission
+    ("repository that is private at the time of writing, so a reader cannot yet check it. One",
+     "repository that was private while the experiments ran and was made public only at submission, "
+     "so outsiders could not observe the pushes as they happened. One"),
+    ("export of the hosting service's push log. The repository is not public at the time of writing\n"
+     "and has no persistent identifier. The repository and the raw request records (about 11\\,GB\n"
+     "compressed) are available from the corresponding author on request.",
+     "export of the hosting service's push log. The repository is public at\n"
+     "\\url{https://github.com/revanthreddy0906/pqc-object-store}; it has no persistent identifier. The raw\n"
+     "request records (about 11\\,GB compressed) are not in the repository because of their size and are\n"
+     "available from the corresponding author on request."),
     # ---- author list and order as given by the authors
     ("\\cbitauthor{Revanth Reddy Lingala}{revanth252017@gmail.com}\\hfill\n"
      "\\cbitauthor{Vainavi Venkat}{vainu24@gmail.com}\\hfill\n"

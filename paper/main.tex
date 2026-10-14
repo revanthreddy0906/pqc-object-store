@@ -638,7 +638,7 @@ repository activity log records each push with its time and resulting commit; th
 cannot edit it, and an export of it is part of the artifact. This establishes one thing: the registered text existed on a third
 party's server before the first run. It does not establish what the authors had seen locally
 before pushing, it is not a registration with an independent registry, and it covers a
-repository that is private at the time of writing, so a reader cannot yet check it. One
+repository that was private while the experiments ran and was made public only at submission, so outsiders could not observe the pushes as they happened. One
 registration was pushed after a run of another experiment had begun
 (Section~\ref{sec:deviations}, item~4). Analyses that were not pre-specified are listed in
 Section~\ref{sec:deviations} and are exploratory.
@@ -1566,9 +1566,10 @@ number in this paper (\texttt{analysis/summarize.py}, \texttt{final\_analysis.py
 \texttt{make\_paper\_assets.py}, \texttt{revision\_assets.py}, \texttt{audit\_assets.py}) are in
 the project repository, organized following ACM artifact guidelines~\cite{acmbadges}; the
 configuration files record the random seed of every experiment, and the repository holds an
-export of the hosting service's push log. The repository is not public at the time of writing
-and has no persistent identifier. The repository and the raw request records (about 11\,GB
-compressed) are available from the corresponding author on request.
+export of the hosting service's push log. The repository is public at
+\url{https://github.com/revanthreddy0906/pqc-object-store}; it has no persistent identifier. The raw
+request records (about 11\,GB compressed) are not in the repository because of their size and are
+available from the corresponding author on request.
 
 \bibliographystyle{IEEEtran}
 \bibliography{references}
