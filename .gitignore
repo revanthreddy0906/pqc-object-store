@@ -39,3 +39,6 @@ paper/main.pdf
 native/pqcnative-linux-amd64
 native/pqcmicro-linux-amd64
 paper/supplement.pdf
+paper/elsevier/main.pdf
+paper/elsevier/.claude/
+paper/elsevier-source.zip
