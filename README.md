@@ -1,95 +1,152 @@
 # pqc-object-store
 
-Benchmarking post-quantum cryptography in cloud object stores under scaled client concurrency
-(Team 12). Objects are encrypted on the client with **ML-KEM-768** (FIPS 203) key encapsulation,
-**HKDF-SHA256** key derivation and chunked **AES-256-GCM**, then stored in an S3-compatible
-**MinIO** server. The same data path is measured against RSA-4096, X25519 and AES-only baselines.
+Code, configurations, results and paper for **"Benchmarking Post-Quantum Key Encapsulation in
+S3-Compatible Object Storage under Client Concurrency"** (Department of Information Technology,
+Chaitanya Bharathi Institute of Technology, Hyderabad).
 
-The binding design, experiment plan and schedule are in
-[`docs/source-of-truth.pdf`](docs/source-of-truth.pdf). Read it before changing protocol,
-timers or the experiment matrix.
+The project measures what it costs to protect every object in an S3-compatible object store with
+post-quantum key encapsulation. Objects are encrypted on the client with **ML-KEM-768**
+(FIPS 203), **HKDF-SHA256** and chunked **AES-256-GCM**, and stored in a single-node **MinIO**
+server. The same data path is measured with X25519, RSA-4096, a symmetric-only baseline, two
+X25519 + ML-KEM hybrids (including X-Wing) and bounded ML-KEM sessions, from 1 to 500 concurrent
+workers.
 
 > Research prototype. liboqs is intended for prototyping and evaluation, and this code is not a
-> production cryptographic service.
+> production cryptographic service. A new design should use HPKE (RFC 9180), not this envelope
+> format.
 
-## Status
+## Main results
 
-| Phase | Scope | State |
+| Finding | Value |
+|---|---|
+| Where ML-KEM lowered throughput | only where the client was at or near CPU saturation (one unexplained exception in the native reader) |
+| Python client, saturated cell, ML-KEM vs X25519 | 4.0 % slower (x86), 4.9 % slower (ARM) |
+| Cause on x86 (two pre-registered controls) | mainly the liboqs-python binding (four foreign calls per decapsulation); 17 % from the larger manifest |
+| ML-KEM through one foreign call | equivalent to X25519 within ±2 % |
+| Native Go reader saturated on one core | 9.5 % slower with ML-KEM, 17.4 % with X-Wing |
+| Storage cost | 1,056 more bytes of ciphertext per object than X25519 |
+
+Scope: two clients (Python on x86 and ARM, a GET-only Go reader), one single-node MinIO store, one
+cloud provider (AWS). See Section 6 of the paper for the threats to validity and the experiments
+not yet run.
+
+## Experiments
+
+| Campaign | Runs | Notes |
 |---|---|---|
-| 1 | Environment: pinned liboqs, MinIO from source, raw S3 round trip | done |
-| 2 | Crypto MVP: ML-KEM-768 + HKDF + chunked AES-256-GCM (mode P1), tamper tests, milestone M1 | done |
-| 3 | Commit-protocol hardening: failure cleanup, read-after-write check, orphan audit/GC, 100-run soak | done |
-| 4 | Streaming: 500 MiB round trips, memory flat in object size (~50 MiB per transfer) | done |
-| 5 | Modes B0/B1/R1/B2/P1/P2 on one data path; multi-process benchmark runner (closed/open loop); client + server samplers; record validator | done |
-| 6 | Pilot matrix on two Linux VMs (`config/pilot.yaml`) | next — needs VMs |
-| 7 | N1 bounded ML-KEM session amortization (fixed and queue-aware), Sweep E config, prior-art note | done |
-| 8 | Final measurements on the VMs | planned |
+| Exploratory (batches A to D) | 1,970 | full matrix, five repetitions; verdicts are exploratory |
+| Confirmatory (E, EK, F, G, H, P, I, IK, I1) | 1,495 (97.6 M requests, 0 failures) | pre-registered; paired TOST at ±5 %, Holm-corrected; x86 and ARM clients |
+| Follow-up controls (J, K, L, M, MT) | 480 | pre-registered manifest, power, binding and allocator controls |
+| Native reader (N) | 90 | Go reader, GET only, pre-registered |
 
-## Milestone M1: encrypted round trip
+The paper uses purpose labels (for example `Primary-x86`, `Control-Binding`); its Table 5 maps
+them to these batch identifiers. Pre-registrations were pushed to this repository before the
+runs they cover; the push times and deviations are documented in
+[`docs/preregistration-timestamps.md`](docs/preregistration-timestamps.md) and
+[`docs/github-activity-log.json`](docs/github-activity-log.json). The full protocol, design
+decisions and version history are in [`docs/source-of-truth.pdf`](docs/source-of-truth.pdf).
 
-```bash
-export OQS_INSTALL_PATH=$PWD/.local/liboqs
-.venv/bin/pqcstore keygen --public keys/recipient.pub --private keys/recipient.key
-.venv/bin/pqcstore put --bucket pqc-bench --key smoke/object-1 \
-    --input fixtures/1MiB.bin --recipient-public-key keys/recipient.pub
-.venv/bin/pqcstore get --bucket pqc-bench --key smoke/object-1 \
-    --output recovered.bin --recipient-private-key keys/recipient.key
-shasum -a 256 fixtures/1MiB.bin recovered.bin
+## Repository layout
+
 ```
-
-`put` and `get` print per-stage timings. A single CLI call includes one-off process start-up
-costs (first KEM call ~8 ms, versus ~20 µs once warm), so CLI timings are for sanity checks
-only. The benchmark runner measures after an in-process warm-up.
+src/pqcstore/
+  crypto/          key-establishment modes (B0, B1, R1, B2, P1, P2, P3/X-Wing, N1 and the
+                   C2/H1/G1 controls), HKDF, chunked AES-GCM, manifest, envelope, sessions
+  storage/         MinIO adapter; encrypted store with manifest-as-commit protocol
+  benchmark/       runner (closed and open loop), samplers, record validator, payload pool
+  cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, bench, validate, gc
+native/            Go reader (GET path of B2, P1, P3), its tests and single-thread micro-timer
+analysis/          per-run summaries, statistics and the generators of every paper number
+config/            experiment configurations (final-a ... final-mt, pilot, development)
+results/           per-run summaries and analysis outputs used by the paper
+scripts/           liboqs build, VM setup, native-reader fixture and benchmark scripts
+infra/aws/         testbed automation (create, provision, run, fetch, tear down)
+docker/            MinIO source-build Dockerfile
+docs/              source of truth, AWS runbook, literature-search log, pre-registration timestamps
+paper/             LaTeX source of the paper (IEEE), supplement, Elsevier version, submission files
+tests/             unit, tamper, binding and MinIO integration tests
+experiments/       raw request records (git-ignored, about 11 GB compressed)
+```
 
 ## Requirements
 
-- Python 3.12, Git, CMake ≥ 3.18 and a C compiler
-- Docker with Compose v2 (development MinIO)
-- ~10 GB free disk for the MinIO build and the liboqs build
+- Python 3.12, Git, CMake 3.18 or later and a C compiler
+- Docker with Compose v2 (local MinIO)
+- Go 1.26 (native reader only)
+- [tectonic](https://tectonic-typesetting.github.io/) (paper only)
+- About 10 GB of free disk for the MinIO and liboqs builds
+
+Pinned versions used in the paper: liboqs 0.16.0, liboqs-python 0.16.0.1,
+pyca/cryptography 50.0.1, MinIO Python SDK 7.2.20, Python 3.12.3, MinIO
+RELEASE.2025-10-15T17-29-55Z, Go 1.26.2.
 
 ## Quick start
 
 ```bash
-make setup          # builds liboqs 0.16.0 into .local/, creates .venv and .env
-make minio-build    # compiles MinIO RELEASE.2025-10-15T17-29-55Z (first build takes minutes)
-make services-up    # starts MinIO on 127.0.0.1:9000 (console on :9001)
-make doctor         # prints and checks versions, liboqs, S3 reachability
-make s3-smoke       # raw 1 MiB upload/download, SHA-256 must match
-make test           # unit + integration tests
-make soak           # 100 encrypted round trips, then checks for orphaned versions
-make stream-check   # 16/128/500 MiB round trips; memory growth must not depend on size
-make bench-smoke    # every mode through the benchmark runner (~6 min, dev only)
-make validate-results  # schema, checksums and timer arithmetic of the newest run
+make setup             # builds liboqs 0.16.0 into .local/, creates .venv and .env
+make minio-build       # compiles MinIO from its final community release (slow the first time)
+make services-up       # starts MinIO on 127.0.0.1:9000
+make doctor            # checks versions, liboqs and S3 reachability
+make test              # unit and integration tests (integration tests skip if MinIO is down)
 ```
 
-Always run Python through the Makefile targets, or export `OQS_INSTALL_PATH=$PWD/.local/liboqs`
-first. Without it, liboqs-python would download an unpinned liboqs; `pqcstore` refuses to load
-in that case.
+Run Python through the Makefile targets, or export `OQS_INSTALL_PATH=$PWD/.local/liboqs` first.
+Without it, liboqs-python would download an unpinned liboqs, and `pqcstore` refuses to load.
 
-## Why MinIO is built from source
+An encrypted round trip:
 
-The MinIO community edition was archived in April 2026, and official images are no longer
-published. `docker/minio.Dockerfile` compiles the final community release tag with Go 1.24.8.
-Because encryption is client-side, any S3-compatible store (for example Garage) can replace it.
-
-## Layout
-
+```bash
+export OQS_INSTALL_PATH=$PWD/.local/liboqs
+.venv/bin/pqcstore keygen --public keys/recipient.pub --private keys/recipient.key
+.venv/bin/pqcstore put --bucket pqc-bench --key demo/object-1 \
+    --input fixtures/1MiB.bin --recipient-public-key keys/recipient.pub
+.venv/bin/pqcstore get --bucket pqc-bench --key demo/object-1 \
+    --output recovered.bin --recipient-private-key keys/recipient.key
 ```
-docker/            MinIO source-build Dockerfile
-docs/              Source of Truth PDF and generator; N1 prior-art note
-scripts/           liboqs build script
-src/pqcstore/
-  crypto/          ML-KEM adapter, HKDF, chunked AES-GCM, manifest, envelope (P1)
-  storage/         MinIO adapter, encrypted store with manifest-as-commit
-  benchmark/       runner, samplers, validator, payload pool, memory probe
-  cli.py           doctor, s3-smoke, keygen, put, get, soak, stream-check, bench, validate, gc
-config/            experiment configurations (development, pilot, n1 = Sweep E)
-tests/             crypto, tamper, binding, hygiene and MinIO integration tests
-experiments/       raw experiment output (git-ignored)
+
+Timings from a single CLI call include one-off start-up costs; the benchmark runner measures only
+after an in-process warm-up.
+
+## Reproducing the paper
+
+Every number, table and figure in the paper is generated from the per-run summaries in
+`results/`; none is typed by hand.
+
+```bash
+make paper-assets      # regenerates paper/generated/ from results/
+make paper             # builds paper/main.pdf (IEEE version)
+cd paper && tectonic -X compile supplement.tex             # supplementary material
+.venv/bin/python paper/tools/build_elsevier.py             # Elsevier version in paper/elsevier/
 ```
+
+Rebuilding the per-run summaries themselves (`analysis/summarize.py`) needs the raw request
+records in `experiments/`, which are not in the repository because of their size.
+
+## Running the experiments
+
+The experiments ran on two AWS instances in one cluster placement group (client c7i.4xlarge or
+c7g.4xlarge, server i4i.4xlarge with local NVMe). [`docs/aws-runbook.md`](docs/aws-runbook.md)
+describes the workflow; in short:
+
+```bash
+infra/aws/pqc-aws.sh check && infra/aws/pqc-aws.sh up && infra/aws/pqc-aws.sh provision
+infra/aws/pqc-aws.sh run config/final-e.yaml
+infra/aws/pqc-aws.sh fetch
+infra/aws/pqc-aws.sh destroy
+```
+
+Every configuration file records the random seed of its experiment. The native reader is run
+with `scripts/native_bench.sh` after `scripts/native_fixture.py` has written its objects.
 
 ## Rules
 
-- Private keys, `.env` and raw experiment data never enter Git.
-- Numbers from laptops or Docker Desktop are never reported (SoT D13); final runs use two Linux VMs.
-- Every reported number is regenerated by a script from retained raw files.
+- Private keys, `.env`, cloud credentials and raw experiment data never enter Git.
+- Numbers from laptops or Docker Desktop are never reported; all measurements come from the
+  cloud testbeds.
+- Every reported number is regenerated by a script from retained data.
+
+## Authors
+
+Revanth Reddy Lingala, K. Gangadhara Rao, Padigela Srujan, Saarthak Manocha and Vainavi Venkat,
+Department of Information Technology, Chaitanya Bharathi Institute of Technology, Hyderabad,
+India. Contact: revanthreddy0906@gmail.com.
